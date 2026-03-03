@@ -56,7 +56,9 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [ollamaModel, setOllamaModel] = useState('qwen3:8b');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
+ 
+  // 思考模式开关（是否请求模型输出带有思考链）
+  const [enableThoughts, setEnableThoughts] = useState(false);
   // Tool State
   const [toolInput, setToolInput] = useState('');
   const [toolOutput, setToolOutput] = useState('');
@@ -84,6 +86,14 @@ export default function App() {
     } catch {}
   }, []);
 
+  // 加载思考模式设置
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem('ctf_enable_thoughts');
+      if (s) setEnableThoughts(s === 'true');
+    } catch {}
+  }, []);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -92,6 +102,13 @@ export default function App() {
     // whenever conversations change, persist
     localStorage.setItem('ctf_conversations', JSON.stringify(conversations));
   }, [conversations]);
+
+  // 持久化思考模式设置
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_enable_thoughts', enableThoughts.toString());
+    } catch {}
+  }, [enableThoughts]);
 
   useEffect(() => {
     // when active conversation changes, update displayed messages
@@ -145,10 +162,9 @@ export default function App() {
 
     try {
       const endpoint = '/api/ollama/chat';
-      const payload = { 
-        model: ollamaModel, 
-        messages: [...messages, userMsg].map(m => ({ role: m.role, content: m.content })) 
-      };
+      // 构建要发送的消息序列，并通过 options 传递 think 参数给 Ollama
+      const outgoing = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const payload = { model: ollamaModel, messages: outgoing, options: { think: enableThoughts } };
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -290,6 +306,19 @@ export default function App() {
             />
           </div>
           
+          <div className="space-y-2">
+            <label className="text-xs uppercase opacity-50 font-bold">思考模式</label>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-gray-300">启用</p>
+              <input
+                type="checkbox"
+                checked={enableThoughts}
+                onChange={(e) => setEnableThoughts(e.target.checked)}
+                className="h-4 w-4"
+              />
+            </div>
+          </div>
+          
           <div className="text-[10px] text-gray-600 leading-tight">
             状态: 本地连接 <br/>
             安全: 是
@@ -429,7 +458,7 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="bg-black/40 border border-blue-800/30 rounded-lg p-6 space-y-6">
+              <div className="bg-black/40 border border-green-900/30 rounded-lg p-6 space-y-6">
                 <div className="space-y-2">
                   <label className="text-xs uppercase opacity-50">输入数据</label>
                   <textarea 
@@ -445,13 +474,13 @@ export default function App() {
                     <>
                       <button 
                         onClick={() => runTool('encode')}
-                        className="flex-1 bg-blue-800/20 hover:bg-blue-800/30 border border-blue-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
+                        className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
                       >
                         编码
                       </button>
                       <button 
                         onClick={() => runTool('decode')}
-                        className="flex-1 bg-blue-800/20 hover:bg-blue-800/30 border border-blue-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
+                        className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
                       >
                         解码
                       </button>
@@ -459,7 +488,7 @@ export default function App() {
                   ) : (
                     <button 
                       onClick={() => runTool('process')}
-                      className="flex-1 bg-blue-800/20 hover:bg-blue-800/30 border border-blue-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
+                      className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
                     >
                       应用 ROT13
                     </button>
