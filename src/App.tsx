@@ -59,6 +59,7 @@ export default function App() {
  
   // 思考模式开关（是否请求模型输出带有思考链）
   const [enableThoughts, setEnableThoughts] = useState(false);
+  const [enableStreaming, setEnableStreaming] = useState(true);
   // Tool State
   const [toolInput, setToolInput] = useState('');
   const [toolOutput, setToolOutput] = useState('');
@@ -91,6 +92,8 @@ export default function App() {
     try {
       const s = localStorage.getItem('ctf_enable_thoughts');
       if (s) setEnableThoughts(s === 'true');
+      const stream = localStorage.getItem('ctf_enable_streaming');
+      if (stream) setEnableStreaming(stream === 'true');
     } catch {}
   }, []);
 
@@ -109,6 +112,12 @@ export default function App() {
       localStorage.setItem('ctf_enable_thoughts', enableThoughts.toString());
     } catch {}
   }, [enableThoughts]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_enable_streaming', enableStreaming.toString());
+    } catch {}
+  }, [enableStreaming]);
 
   useEffect(() => {
     // when active conversation changes, update displayed messages
@@ -149,74 +158,187 @@ export default function App() {
 
   const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
-
     const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
     setMessages(prev => {
       const updated = [...prev, userMsg];
-      // also update active conversation
-      setConversations(convs => convs.map(c => c.id === activeConvId ? {...c, messages: updated} : c));
+      setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
       return updated;
     });
     setInput('');
     setIsLoading(true);
-
     try {
       const endpoint = '/api/ollama/chat';
-      // 构建要发送的消息序列，并通过 options 传递 think 参数给 Ollama
       const outgoing = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
-      const payload = { model: ollamaModel, messages: outgoing, options: { think: enableThoughts } };
-
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      console.debug('ollama response', data);
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to fetch response');
-      }
-
-      // extract content and optional reasoning from various possible response shapes
-      let content = '';
-      let thoughts: string | undefined;
-
-      if (data.message) {
-        content = data.message.content;
-        thoughts = data.message.thoughts || data.message.reasoning;
-      } else if (data.choices && data.choices[0]?.message) {
-        content = data.choices[0].message.content;
-        thoughts = data.choices[0].message.thoughts || data.choices[0].message.reasoning;
-      } else if (typeof data === 'string') {
-        content = data;
-      }
-
-      // if no explicit "thoughts" field but the content includes tagged reasoning, split it
-      if (!thoughts) {
-        const result = extractThoughts(content);
-        content = result.cleaned;
-        thoughts = result.thoughts;
-      }
-
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content,
-        timestamp: Date.now(),
-        ...(thoughts ? { thoughts } : {})
+      const payload = {
+        model: ollamaModel,
+        messages: outgoing,
+        stream: enableStreaming,
+        options: { think: enableThoughts }
       };
-
-      setMessages(prev => {
-        const updated = [...prev, assistantMsg];
-        setConversations(convs => convs.map(c => c.id === activeConvId ? {...c, messages: updated} : c));
-        return updated;
-      });
+      if (enableStreaming && typeof ReadableStream !== 'undefined') {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok || !res.body) {
+          const errText = await res.text();
+          throw new Error(errText || 'Stream request failed');
+        }
+        let pendingContent = '';
+        let pendingThoughts = '';
+        let charQueue = '';
+        let streamEnded = false;
+        let typingTimer: ReturnType<typeof setInterval> | null = null;
+        const updateAssistantMessage = () => {
+          setMessages(prev => {
+            const last = prev[prev.length - 1];
+            if (!last || last.role !== 'assistant') return prev;
+            const updatedLast: Message = {
+              ...last,
+              content: pendingContent,
+              ...(pendingThoughts ? { thoughts: pendingThoughts } : {})
+            };
+            const updated = [...prev.slice(0, -1), updatedLast];
+            setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
+            return updated;
+          });
+        };
+        const ensureTypingTimer = () => {
+          if (typingTimer) return;
+          typingTimer = setInterval(() => {
+            if (!charQueue.length) {
+              if (streamEnded) {
+                clearInterval(typingTimer!);
+                typingTimer = null;
+                updateAssistantMessage();
+              }
+              return;
+            }
+            pendingContent += charQueue[0];
+            charQueue = charQueue.slice(1);
+            updateAssistantMessage();
+          }, 12);
+        };
+        setMessages(prev => {
+          const assistantMsg: Message = { role: 'assistant', content: '', timestamp: Date.now() };
+          const updated = [...prev, assistantMsg];
+          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
+          return updated;
+        });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        const processStreamLine = (line: string) => {
+          if (!line) return;
+          try {
+            const obj = JSON.parse(line);
+            const rawFragment = obj?.message?.content ?? obj?.content ?? '';
+            const fragment = String(rawFragment).replace(/\[\[THOUGHTS\]\]|\[\[\/THOUGHTS\]\]/gi, '');
+            if (fragment) {
+              charQueue += fragment;
+              ensureTypingTimer();
+            }
+            if (enableThoughts) {
+              const thoughtChunk =
+                obj?.message?.thinking ??
+                obj?.message?.thoughts ??
+                obj?.message?.reasoning ??
+                obj?.thinking ??
+                obj?.thoughts ??
+                obj?.reasoning ??
+                '';
+              if (thoughtChunk) {
+                const nextThoughts = String(thoughtChunk);
+                if (nextThoughts.startsWith(pendingThoughts)) {
+                  pendingThoughts = nextThoughts;
+                } else {
+                  pendingThoughts += nextThoughts;
+                }
+                updateAssistantMessage();
+              }
+            }
+            if (obj?.done) {
+              streamEnded = true;
+              ensureTypingTimer();
+            }
+          } catch {
+            // ignore malformed lines
+          }
+        };
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            processStreamLine(line.trim());
+          }
+        }
+        if (buffer.trim()) {
+          processStreamLine(buffer.trim());
+        }
+        streamEnded = true;
+        ensureTypingTimer();
+        await new Promise<void>((resolve) => {
+          const waitUntilComplete = () => {
+            if (!typingTimer && !charQueue.length) {
+              resolve();
+              return;
+            }
+            setTimeout(waitUntilComplete, 16);
+          };
+          waitUntilComplete();
+        });
+      } else {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        console.debug('ollama response', data);
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to fetch response');
+        }
+        let content = '';
+        let thoughts: string | undefined;
+        if (data.message) {
+          content = data.message.content;
+          thoughts = data.message.thoughts || data.message.reasoning;
+        } else if (data.choices && data.choices[0]?.message) {
+          content = data.choices[0].message.content;
+          thoughts = data.choices[0].message.thoughts || data.choices[0].message.reasoning;
+        } else if (typeof data === 'string') {
+          content = data;
+        }
+        if (!thoughts) {
+          const result = extractThoughts(content);
+          content = result.cleaned;
+          thoughts = result.thoughts;
+        }
+        content = content.replace(/\[\[THOUGHTS\]\]|\[\[\/THOUGHTS\]\]/gi, '');
+        if (!enableThoughts) {
+          thoughts = undefined;
+        }
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content,
+          timestamp: Date.now(),
+          ...(thoughts ? { thoughts } : {})
+        };
+        setMessages(prev => {
+          const updated = [...prev, assistantMsg];
+          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
+          return updated;
+        });
+      }
     } catch (error: any) {
-      setMessages(prev => [...prev, { 
-        role: 'system', 
-        content: `错误: ${error.message}. 请确保 Ollama 正在本地运行 (http://localhost:11434) 并允许连接。`, 
-        timestamp: Date.now() 
+      setMessages(prev => [...prev, {
+        role: 'system',
+        content: `Error: ${error?.message || String(error)}. Ensure Ollama is running on http://localhost:11434`,
+        timestamp: Date.now()
       }]);
     } finally {
       setIsLoading(false);
@@ -318,7 +440,18 @@ export default function App() {
               />
             </div>
           </div>
-          
+          <div className="space-y-2">
+            <label className="text-xs uppercase opacity-50 font-bold">Streaming</label>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-gray-300">Enable token stream</p>
+              <input
+                type="checkbox"
+                checked={enableStreaming}
+                onChange={(e) => setEnableStreaming(e.target.checked)}
+                className="h-4 w-4"
+              />
+            </div>
+          </div>
           <div className="text-[10px] text-gray-600 leading-tight">
             状态: 本地连接 <br/>
             安全: 是

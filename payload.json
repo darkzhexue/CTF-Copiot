@@ -1,0 +1,1 @@
+﻿{"model":"qwen3:8b","messages":[{"role":"system","content":"CTF 助手已初始化成功"},{"role":"user","content":"测试流式: 你好"}],"stream":true,"options":{"think":true}}
