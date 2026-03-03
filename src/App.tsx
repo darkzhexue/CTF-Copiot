@@ -618,7 +618,7 @@ export default function App() {
         <div className="h-14 border-b border-green-900/30 bg-[#050505]/90 backdrop-blur px-4 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm text-white truncate">{activeConversation?.name || '未选择会话'}</div>
-            <div className="text-[11px] text-gray-500">{activeTab === 'chat' ? '作战聊天' : activeTab === 'tools' ? '网络工具' : '任务日志'}</div>
+            <div className="text-[11px] text-gray-500">{activeTab === 'chat' ? '解题问答' : activeTab === 'tools' ? '网络工具' : '任务日志'}</div>
           </div>
 
           <div className="flex items-center gap-2">
