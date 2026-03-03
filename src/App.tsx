@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -190,11 +190,13 @@ export default function App() {
   }, [activeConvId, conversations]);
 
   const createConversation = () => {
-    const name = window.prompt('请输入对话名称', '新会话');
     const id = Date.now().toString();
+    const userInput = window.prompt('请输入新会话名称', `会话 ${conversations.length + 1}`);
+    if (userInput === null) return; // User cancelled
+    const name = userInput.trim() || `未命名会话 ${conversations.length + 1}`;
     const conv: Conversation = {
       id,
-      name: name || '未命名',
+      name,
       messages: [{ role: 'assistant', content: INITIAL_SYSTEM_MESSAGE, timestamp: Date.now() }]
     };
     setConversations(prev => [conv, ...prev]);
@@ -495,70 +497,146 @@ export default function App() {
     { label: "抓包分析", prompt: "这是一段截获的数据包内容，试图分析一下攻击者意图。" }
   ];
 
+  const groupConversationByTime = (timestamp: number) => {
+    const now = new Date();
+    const currentDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const target = new Date(timestamp);
+    const targetDate = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+    const dayDiff = Math.floor((currentDate.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (dayDiff === 0) return '今天';
+    if (dayDiff === 1) return '昨天';
+    if (dayDiff <= 30) return '30 天内';
+    return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const groupedConversations = useMemo(() => {
+    const sections = new Map<string, Conversation[]>();
+    for (const conv of conversations) {
+      const lastTimestamp = conv.messages[conv.messages.length - 1]?.timestamp ?? Date.now();
+      const section = groupConversationByTime(lastTimestamp);
+      const existing = sections.get(section) || [];
+      existing.push(conv);
+      sections.set(section, existing);
+    }
+    return Array.from(sections.entries());
+  }, [conversations]);
+
+  const activeConversation = conversations.find(c => c.id === activeConvId);
+
   return (
     <div className="min-h-screen bg-gray-900 text-white font-mono selection:bg-gray-700 selection:text-white flex flex-col md:flex-row overflow-hidden">
       <MatrixBackground />
       
       {/* Sidebar */}
-      <div className="w-full md:w-64 border-b md:border-r border-green-900/30 bg-[#050505]/90 backdrop-blur-sm z-10 flex flex-col">
+      <div className="w-full md:w-72 border-b md:border-r border-green-900/30 bg-[#050505]/90 backdrop-blur-sm z-10 flex flex-col">
         <div className="p-4 border-b border-green-900/30 flex items-center gap-2">
           <Shield className="w-6 h-6" />
           <h1 className="font-bold text-lg tracking-tighter">CTF Pilot</h1>
         </div>
 
-        <nav className="flex-1 p-2 space-y-1">
+        <div className="p-3 border-b border-green-900/30">
           <button 
+            onClick={createConversation}
+            className={cn(
+              "w-full h-9 flex items-center justify-center gap-2 px-3 rounded-full border text-sm transition-colors focus:outline-none focus-visible:ring-0",
+              "border-gray-600/60 bg-gray-200/20 text-white hover:bg-gray-200/30"
+            )}
+          >
+            <Plus className="w-4 h-4" />
+            <span>开启新对话</span>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          {groupedConversations.map(([section, sectionConversations]) => (
+            <div key={section} className="space-y-2">
+              <p className="text-[11px] uppercase tracking-wide text-gray-500">{section}</p>
+              <div className="space-y-1.5">
+                {sectionConversations.map((conv) => {
+                  // Skip welcome message for preview
+                  const userMessage = conv.messages.find(m => m.role === 'user')?.content;
+                  const nonWelcomeMessage = conv.messages.find(m => 
+                    m.role === 'assistant' && 
+                    !m.content.includes('CTF 解题助手')
+                  )?.content;
+                  const previewMessage = userMessage || nonWelcomeMessage || '暂无消息';
+                  return (
+                    <button
+                      key={conv.id}
+                      onClick={() => selectConversation(conv.id)}
+                      className={cn(
+                        "w-full text-left rounded-lg border px-3 py-2 transition-colors",
+                        activeConvId === conv.id
+                          ? "border-gray-600 bg-gray-800/35 text-white"
+                          : "border-transparent text-gray-300 hover:border-gray-700/60 hover:bg-gray-800/20"
+                      )}
+                    >
+                      <div className="truncate text-sm font-medium">{conv.name}</div>
+                      <div className="mt-1 truncate text-xs text-gray-400">{previewMessage}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="p-2 border-t border-green-900/30 grid grid-cols-3 gap-1">
+          <button
             onClick={() => setActiveTab('chat')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
-              activeTab === 'chat' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
+              "h-9 flex items-center justify-center gap-1.5 rounded-md border text-xs transition-colors",
+              activeTab === 'chat' ? "bg-gray-800/25 text-white border-gray-700/60" : "border-transparent text-gray-400 hover:bg-gray-800/15"
             )}
           >
-            <Terminal className="w-4 h-4" />
-            <span>作战聊天</span>
+            <Terminal className="w-3.5 h-3.5" />聊天
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('tools')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
-              activeTab === 'tools' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
+              "h-9 flex items-center justify-center gap-1.5 rounded-md border text-xs transition-colors",
+              activeTab === 'tools' ? "bg-gray-800/25 text-white border-gray-700/60" : "border-transparent text-gray-400 hover:bg-gray-800/15"
             )}
           >
-            <Cpu className="w-4 h-4" />
-            <span>网络工具</span>
+            <Cpu className="w-3.5 h-3.5" />工具
           </button>
-          <button 
+          <button
             onClick={() => setActiveTab('notes')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
-              activeTab === 'notes' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
+              "h-9 flex items-center justify-center gap-1.5 rounded-md border text-xs transition-colors",
+              activeTab === 'notes' ? "bg-gray-800/25 text-white border-gray-700/60" : "border-transparent text-gray-400 hover:bg-gray-800/15"
             )}
           >
-            <Code className="w-4 h-4" />
-            <span>任务日志</span>
+            <Code className="w-3.5 h-3.5" />日志
           </button>
-        </nav>
+        </div>
+      </div>
 
-        <div className="p-4 border-t border-green-900/30 space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-xs uppercase opacity-50 font-bold">模型 ID</label>
-              <button
-                type="button"
-                onClick={loadOllamaModels}
-                disabled={modelsLoading}
-                className="text-[10px] text-gray-300 hover:text-white disabled:opacity-50"
-              >
-                {modelsLoading ? '刷新中...' : '刷新'}
-              </button>
-            </div>
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col relative z-10 h-[calc(100vh-64px)] md:h-screen">
+        <div className="h-14 border-b border-green-900/30 bg-[#050505]/90 backdrop-blur px-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm text-white truncate">{activeConversation?.name || '未选择会话'}</div>
+            <div className="text-[11px] text-gray-500">{activeTab === 'chat' ? '作战聊天' : activeTab === 'tools' ? '网络工具' : '任务日志'}</div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={loadOllamaModels}
+              disabled={modelsLoading}
+              className="h-8 px-2.5 rounded border border-gray-800/50 text-xs text-gray-300 hover:text-white hover:border-gray-600 disabled:opacity-50"
+            >
+              {modelsLoading ? '刷新中...' : '刷新模型'}
+            </button>
 
             {modelInputMode === 'select' ? (
               <select
                 value={ollamaModel}
                 onChange={(e) => setOllamaModel(e.target.value)}
                 disabled={modelsLoading || availableModels.length === 0}
-                className="w-full bg-black border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500 disabled:opacity-60"
+                className="h-8 max-w-44 bg-black border border-gray-800/50 rounded px-2 text-xs text-white focus:outline-none focus:border-gray-500 disabled:opacity-60"
               >
                 {availableModels.map((modelName) => (
                   <option key={modelName} value={modelName}>{modelName}</option>
@@ -569,78 +647,60 @@ export default function App() {
                 type="text"
                 value={ollamaModel}
                 onChange={(e) => setOllamaModel(e.target.value)}
-                className="w-full bg-black border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500"
+                className="h-8 w-40 bg-black border border-gray-800/50 rounded px-2 text-xs text-white focus:outline-none focus:border-gray-500"
                 placeholder="例如：qwen3:8b"
               />
             )}
 
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               <button
                 type="button"
                 onClick={() => setModelInputMode('select')}
                 disabled={!availableModels.length}
                 className={cn(
-                  'flex-1 h-7 rounded border text-[11px] transition-colors',
+                  'h-8 px-2 rounded border text-[11px] transition-colors',
                   modelInputMode === 'select'
                     ? 'border-gray-600 bg-gray-800/30 text-white'
                     : 'border-gray-800/50 text-gray-300 hover:border-gray-600 hover:text-white',
                   !availableModels.length ? 'opacity-50 cursor-not-allowed' : ''
                 )}
               >
-                列表切换
+                列表
               </button>
               <button
                 type="button"
                 onClick={() => setModelInputMode('manual')}
                 className={cn(
-                  'flex-1 h-7 rounded border text-[11px] transition-colors',
+                  'h-8 px-2 rounded border text-[11px] transition-colors',
                   modelInputMode === 'manual'
                     ? 'border-gray-600 bg-gray-800/30 text-white'
                     : 'border-gray-800/50 text-gray-300 hover:border-gray-600 hover:text-white'
                 )}
               >
-                手动输入
+                手动
               </button>
             </div>
 
-            {modelsError && (
-              <p className="text-[10px] text-yellow-400/80 leading-tight">{modelsError}</p>
-            )}
-          </div>
-          
-          <div className="text-[10px] text-gray-600 leading-tight space-y-1">
-            <div className="flex items-center gap-1.5">
-              <span
-                className={cn(
-                  'inline-block h-2 w-2 rounded-full',
-                  isLoading ? 'bg-emerald-400 shadow-[0_0_8px_rgba(74,222,128,0.7)]' : 'bg-gray-600'
-                )}
-              />
-              <span>模型: {isLoading ? '运行中' : '待机'}</span>
+            <div className="text-[10px] text-gray-500 leading-tight">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={cn(
+                    'inline-block h-2 w-2 rounded-full',
+                    isLoading ? 'bg-emerald-400 shadow-[0_0_8px_rgba(74,222,128,0.7)]' : 'bg-gray-600'
+                  )}
+                />
+                <span>{isLoading ? '运行中' : '待机'}</span>
+              </div>
             </div>
-            <div>连接: 本地</div>
-            <div>安全: 是</div>
           </div>
         </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col relative z-10 h-[calc(100vh-64px)] md:h-screen">
         {activeTab === 'chat' && (
           <>
             {/* Chat Area */}
             <div className="p-4 border-b border-green-900/30 flex items-center justify-between space-x-2">
               <div className="flex items-center gap-2">
-                <label className="text-xs opacity-50">会话：</label>
-                <select
-                  value={activeConvId}
-                  onChange={e => selectConversation(e.target.value)}
-                  className="bg-black/50 border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none"
-                >
-                  {conversations.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                <label className="text-xs opacity-50">当前会话：</label>
+                <span className="text-sm text-white">{activeConversation?.name || '未选择'}</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
