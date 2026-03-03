@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square } from 'lucide-react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -61,6 +61,7 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([defaultConv]);
   const [activeConvId, setActiveConvId] = useState<string>(defaultConv.id);
   const [messages, setMessages] = useState<Message[]>(defaultConv.messages);
+  const [hasHydratedConversations, setHasHydratedConversations] = useState(false);
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -135,12 +136,18 @@ export default function App() {
       if (saved) {
         const parsed: Conversation[] = JSON.parse(saved);
         if (parsed.length) {
+          const savedActiveConvId = localStorage.getItem('ctf_active_conv_id');
+          const nextActiveConvId = savedActiveConvId && parsed.some(c => c.id === savedActiveConvId)
+            ? savedActiveConvId
+            : parsed[0].id;
           setConversations(parsed);
-          setActiveConvId(parsed[0].id);
-          setMessages(parsed[0].messages);
+          setActiveConvId(nextActiveConvId);
+          const activeConv = parsed.find(c => c.id === nextActiveConvId) || parsed[0];
+          setMessages(activeConv.messages);
         }
       }
     } catch {}
+    setHasHydratedConversations(true);
   }, []);
 
   useEffect(() => {
@@ -153,8 +160,14 @@ export default function App() {
 
   useEffect(() => {
     // whenever conversations change, persist
+    if (!hasHydratedConversations) return;
     localStorage.setItem('ctf_conversations', JSON.stringify(conversations));
-  }, [conversations]);
+  }, [conversations, hasHydratedConversations]);
+
+  useEffect(() => {
+    if (!hasHydratedConversations) return;
+    localStorage.setItem('ctf_active_conv_id', activeConvId);
+  }, [activeConvId, hasHydratedConversations]);
 
   useEffect(() => {
     try {
@@ -190,6 +203,40 @@ export default function App() {
 
   const selectConversation = (id: string) => {
     setActiveConvId(id);
+  };
+
+  const clearConversationHistory = () => {
+    const confirmed = window.confirm('确定要清空所有会话记录吗？此操作不可撤销。');
+    if (!confirmed) return;
+    setConversations([defaultConv]);
+    setActiveConvId(defaultConv.id);
+    setMessages(defaultConv.messages);
+    localStorage.removeItem('ctf_conversations');
+    localStorage.removeItem('ctf_active_conv_id');
+  };
+
+  const deleteCurrentConversation = () => {
+    const currentConv = conversations.find(c => c.id === activeConvId);
+    if (!currentConv) return;
+
+    const confirmed = window.confirm(`确定要删除当前对话“${currentConv.name}”吗？`);
+    if (!confirmed) return;
+
+    if (conversations.length <= 1) {
+      setConversations([defaultConv]);
+      setActiveConvId(defaultConv.id);
+      setMessages(defaultConv.messages);
+      return;
+    }
+
+    const currentIndex = conversations.findIndex(c => c.id === activeConvId);
+    const remainingConversations = conversations.filter(c => c.id !== activeConvId);
+    const nextIndex = Math.min(currentIndex, remainingConversations.length - 1);
+    const nextConv = remainingConversations[nextIndex];
+
+    setConversations(remainingConversations);
+    setActiveConvId(nextConv.id);
+    setMessages(nextConv.messages);
   };
 
   const handleAbort = async () => {
@@ -595,13 +642,31 @@ export default function App() {
                   ))}
                 </select>
               </div>
-              <button
-                onClick={createConversation}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-700/50 bg-black/40 px-3 text-xs text-gray-200 transition-colors hover:border-gray-500/70 hover:bg-gray-800/30 hover:text-white"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>新建对话</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={deleteCurrentConversation}
+                  disabled={isLoading || isAborting}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>删除当前</span>
+                </button>
+                <button
+                  onClick={clearConversationHistory}
+                  disabled={isLoading || isAborting}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  <span>清空记录</span>
+                </button>
+                <button
+                  onClick={createConversation}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-700/50 bg-black/40 px-3 text-xs text-gray-200 transition-colors hover:border-gray-500/70 hover:bg-gray-800/30 hover:text-white"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>新建对话</span>
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-green-900 scrollbar-track-transparent">
               {messages.map((msg, idx) => (
