@@ -359,15 +359,15 @@ export default function App() {
       <div className="w-full md:w-64 border-b md:border-r border-green-900/30 bg-[#050505]/90 backdrop-blur-sm z-10 flex flex-col">
         <div className="p-4 border-b border-green-900/30 flex items-center gap-2">
           <Shield className="w-6 h-6" />
-          <h1 className="font-bold text-lg tracking-tighter">CTF_助手</h1>
+          <h1 className="font-bold text-lg tracking-tighter">CTF Pilot</h1>
         </div>
 
         <nav className="flex-1 p-2 space-y-1">
           <button 
             onClick={() => setActiveTab('chat')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
-              activeTab === 'chat' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
+              activeTab === 'chat' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
             )}
           >
             <Terminal className="w-4 h-4" />
@@ -376,8 +376,8 @@ export default function App() {
           <button 
             onClick={() => setActiveTab('tools')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
-              activeTab === 'tools' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
+              activeTab === 'tools' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
             )}
           >
             <Cpu className="w-4 h-4" />
@@ -386,8 +386,8 @@ export default function App() {
           <button 
             onClick={() => setActiveTab('notes')}
             className={cn(
-              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
-              activeTab === 'notes' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md border text-sm transition-colors focus:outline-none focus-visible:ring-0",
+              activeTab === 'notes' ? "bg-gray-800/20 text-white border-gray-800/50" : "border-transparent hover:bg-gray-800/10 text-gray-300"
             )}
           >
             <Code className="w-4 h-4" />
