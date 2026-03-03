@@ -17,6 +17,28 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // List installed Ollama models for selector UI.
+  app.get("/api/ollama/models", async (_req, res) => {
+    const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    try {
+      const response = await axios.get(`${ollamaUrl}/api/tags`, { responseType: "json" });
+      const models = Array.isArray(response.data?.models)
+        ? response.data.models
+            .map((item: any) => item?.name)
+            .filter((name: any) => typeof name === "string" && name.trim().length > 0)
+        : [];
+
+      return res.json({ models });
+    } catch (error: any) {
+      console.error("Failed to fetch Ollama models:", error?.message || error);
+      return res.status(502).json({
+        error: "Failed to fetch Ollama models",
+        details: error?.message || String(error),
+        hint: "Ensure Ollama is running locally on port 11434.",
+      });
+    }
+  });
+
   // Ollama proxy route
   app.post("/api/ollama/chat", async (req, res) => {
     const { model, messages, stream, options } = req.body as any;

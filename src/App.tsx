@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus } from 'lucide-react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -36,6 +36,14 @@ const MatrixBackground = () => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'tools' | 'notes'>('chat');
+  const [modelInputMode, setModelInputMode] = useState<'select' | 'manual'>(() => {
+    try {
+      const saved = localStorage.getItem('ctf_model_input_mode');
+      return saved === 'manual' || saved === 'select' ? saved : 'select';
+    } catch {
+      return 'select';
+    }
+  });
 
   // Conversation management
   type Conversation = {
@@ -56,8 +64,19 @@ export default function App() {
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [ollamaModel, setOllamaModel] = useState('qwen3:8b');
+  const [isAborting, setIsAborting] = useState(false);
+  const [ollamaModel, setOllamaModel] = useState(() => {
+    try {
+      return localStorage.getItem('ctf_ollama_model') || 'qwen3:8b';
+    } catch {
+      return 'qwen3:8b';
+    }
+  });
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
  
   // 思考模式开关（是否请求模型输出带有思考链）
   const [enableThoughts] = useState(true);
@@ -72,6 +91,41 @@ export default function App() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const loadOllamaModels = async () => {
+    setModelsLoading(true);
+    setModelsError('');
+    try {
+      const res = await fetch('/api/ollama/models');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to fetch model list');
+      }
+      const models = Array.isArray(data?.models)
+        ? data.models.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+      setAvailableModels(models);
+
+      if (!models.length) {
+        setModelsError('未检测到已安装模型，请使用手动输入。');
+        setModelInputMode('manual');
+        return;
+      }
+
+      if (!models.includes(ollamaModel)) {
+        setOllamaModel(models[0]);
+      }
+      if (modelInputMode !== 'manual') {
+        setModelInputMode('select');
+      }
+    } catch (error: any) {
+      setAvailableModels([]);
+      setModelsError(error?.message || '读取模型列表失败');
+      setModelInputMode('manual');
+    } finally {
+      setModelsLoading(false);
+    }
   };
 
   // load/save conversations
@@ -90,6 +144,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    loadOllamaModels();
+  }, []);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
@@ -97,6 +155,18 @@ export default function App() {
     // whenever conversations change, persist
     localStorage.setItem('ctf_conversations', JSON.stringify(conversations));
   }, [conversations]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_ollama_model', ollamaModel);
+    } catch {}
+  }, [ollamaModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_model_input_mode', modelInputMode);
+    } catch {}
+  }, [modelInputMode]);
 
   useEffect(() => {
     // when active conversation changes, update displayed messages
@@ -122,6 +192,22 @@ export default function App() {
     setActiveConvId(id);
   };
 
+  const handleAbort = async () => {
+    if (!isLoading && !activeRequestControllerRef.current) return;
+    setIsAborting(true);
+    try {
+      await fetch('/api/ollama/abort', { method: 'POST' });
+    } catch {}
+
+    try {
+      activeRequestControllerRef.current?.abort();
+    } catch {}
+
+    activeRequestControllerRef.current = null;
+    setIsLoading(false);
+    setIsAborting(false);
+  };
+
   // helper that pulls out [[THOUGHTS]] tags if present
   const extractThoughts = (text: string) => {
     const marker = /\[\[THOUGHTS\]\]([\s\S]*?)\[\[\/THOUGHTS\]\]/i;
@@ -145,6 +231,8 @@ export default function App() {
     });
     setInput('');
     setIsLoading(true);
+    const requestController = new AbortController();
+    activeRequestControllerRef.current = requestController;
     try {
       const endpoint = '/api/ollama/chat';
       const outgoing = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
@@ -158,7 +246,8 @@ export default function App() {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: requestController.signal
         });
         if (!res.ok || !res.body) {
           const errText = await res.text();
@@ -274,7 +363,8 @@ export default function App() {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: requestController.signal
         });
         const data = await res.json();
         console.debug('ollama response', data);
@@ -314,13 +404,20 @@ export default function App() {
         });
       }
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
       setMessages(prev => [...prev, {
         role: 'system',
         content: `Error: ${error?.message || String(error)}. Ensure Ollama is running on http://localhost:11434`,
         timestamp: Date.now()
       }]);
     } finally {
+      if (activeRequestControllerRef.current === requestController) {
+        activeRequestControllerRef.current = null;
+      }
       setIsLoading(false);
+      setIsAborting(false);
     }
   };
 
@@ -397,19 +494,85 @@ export default function App() {
 
         <div className="p-4 border-t border-green-900/30 space-y-4">
           <div className="space-y-2">
-            <label className="text-xs uppercase opacity-50 font-bold">模型 ID</label>
-            <input 
-              type="text" 
-              value={ollamaModel}
-              onChange={(e) => setOllamaModel(e.target.value)}
-              className="w-full bg-black border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500"
-              placeholder="qwen3:8b"
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-xs uppercase opacity-50 font-bold">模型 ID</label>
+              <button
+                type="button"
+                onClick={loadOllamaModels}
+                disabled={modelsLoading}
+                className="text-[10px] text-gray-300 hover:text-white disabled:opacity-50"
+              >
+                {modelsLoading ? '刷新中...' : '刷新'}
+              </button>
+            </div>
+
+            {modelInputMode === 'select' ? (
+              <select
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                disabled={modelsLoading || availableModels.length === 0}
+                className="w-full bg-black border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500 disabled:opacity-60"
+              >
+                {availableModels.map((modelName) => (
+                  <option key={modelName} value={modelName}>{modelName}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                className="w-full bg-black border border-gray-800/50 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-gray-500"
+                placeholder="例如：qwen3:8b"
+              />
+            )}
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setModelInputMode('select')}
+                disabled={!availableModels.length}
+                className={cn(
+                  'flex-1 h-7 rounded border text-[11px] transition-colors',
+                  modelInputMode === 'select'
+                    ? 'border-gray-600 bg-gray-800/30 text-white'
+                    : 'border-gray-800/50 text-gray-300 hover:border-gray-600 hover:text-white',
+                  !availableModels.length ? 'opacity-50 cursor-not-allowed' : ''
+                )}
+              >
+                列表切换
+              </button>
+              <button
+                type="button"
+                onClick={() => setModelInputMode('manual')}
+                className={cn(
+                  'flex-1 h-7 rounded border text-[11px] transition-colors',
+                  modelInputMode === 'manual'
+                    ? 'border-gray-600 bg-gray-800/30 text-white'
+                    : 'border-gray-800/50 text-gray-300 hover:border-gray-600 hover:text-white'
+                )}
+              >
+                手动输入
+              </button>
+            </div>
+
+            {modelsError && (
+              <p className="text-[10px] text-yellow-400/80 leading-tight">{modelsError}</p>
+            )}
           </div>
           
-          <div className="text-[10px] text-gray-600 leading-tight">
-            状态: 本地连接 <br/>
-            安全: 是
+          <div className="text-[10px] text-gray-600 leading-tight space-y-1">
+            <div className="flex items-center gap-1.5">
+              <span
+                className={cn(
+                  'inline-block h-2 w-2 rounded-full',
+                  isLoading ? 'bg-emerald-400 shadow-[0_0_8px_rgba(74,222,128,0.7)]' : 'bg-gray-600'
+                )}
+              />
+              <span>模型: {isLoading ? '运行中' : '待机'}</span>
+            </div>
+            <div>连接: 本地</div>
+            <div>安全: 是</div>
           </div>
         </div>
       </div>
@@ -515,6 +678,14 @@ export default function App() {
                   className="h-10 w-10 flex items-center justify-center bg-gray-800/20 hover:bg-gray-800/40 border border-gray-500/30 text-white rounded-md transition-colors disabled:opacity-50"
                 >
                   <Send className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleAbort}
+                  disabled={!isLoading && !isAborting}
+                  className="h-10 w-10 flex items-center justify-center bg-red-900/20 hover:bg-red-900/35 border border-red-500/30 text-red-200 rounded-md transition-colors disabled:opacity-40"
+                  title="终止当前模型响应"
+                >
+                  <Square className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
