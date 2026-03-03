@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle } from 'lucide-react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -13,6 +13,8 @@ type Message = {
 };
 
 type ToolType = 'base64' | 'hex' | 'rot13' | 'url';
+
+const INITIAL_SYSTEM_MESSAGE = `你好，我是 CTF 解题助手。我可以协助代码审计、逆向分析、编码/加密识别、Linux 提权排查和流量分析；直接贴题目现象、代码或数据即可开始。`;
 
 // --- Components ---
 
@@ -45,7 +47,7 @@ export default function App() {
   const defaultConv: Conversation = {
     id: 'default',
     name: '默认会话',
-    messages: [{ role: 'system', content: 'CTF 助手已初始化成功', timestamp: Date.now() }]
+    messages: [{ role: 'assistant', content: INITIAL_SYSTEM_MESSAGE, timestamp: Date.now() }]
   };
 
   const [conversations, setConversations] = useState<Conversation[]>([defaultConv]);
@@ -58,8 +60,8 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
  
   // 思考模式开关（是否请求模型输出带有思考链）
-  const [enableThoughts, setEnableThoughts] = useState(false);
-  const [enableStreaming, setEnableStreaming] = useState(true);
+  const [enableThoughts] = useState(true);
+  const [enableStreaming] = useState(true);
   // Tool State
   const [toolInput, setToolInput] = useState('');
   const [toolOutput, setToolOutput] = useState('');
@@ -87,16 +89,6 @@ export default function App() {
     } catch {}
   }, []);
 
-  // 加载思考模式设置
-  useEffect(() => {
-    try {
-      const s = localStorage.getItem('ctf_enable_thoughts');
-      if (s) setEnableThoughts(s === 'true');
-      const stream = localStorage.getItem('ctf_enable_streaming');
-      if (stream) setEnableStreaming(stream === 'true');
-    } catch {}
-  }, []);
-
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
@@ -105,19 +97,6 @@ export default function App() {
     // whenever conversations change, persist
     localStorage.setItem('ctf_conversations', JSON.stringify(conversations));
   }, [conversations]);
-
-  // 持久化思考模式设置
-  useEffect(() => {
-    try {
-      localStorage.setItem('ctf_enable_thoughts', enableThoughts.toString());
-    } catch {}
-  }, [enableThoughts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('ctf_enable_streaming', enableStreaming.toString());
-    } catch {}
-  }, [enableStreaming]);
 
   useEffect(() => {
     // when active conversation changes, update displayed messages
@@ -133,7 +112,7 @@ export default function App() {
     const conv: Conversation = {
       id,
       name: name || '未命名',
-      messages: [{ role: 'system', content: 'CTF 助手', timestamp: Date.now() }]
+      messages: [{ role: 'assistant', content: INITIAL_SYSTEM_MESSAGE, timestamp: Date.now() }]
     };
     setConversations(prev => [conv, ...prev]);
     setActiveConvId(id);
@@ -387,7 +366,7 @@ export default function App() {
           <button 
             onClick={() => setActiveTab('chat')}
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all text-sm",
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
               activeTab === 'chat' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
             )}
           >
@@ -397,7 +376,7 @@ export default function App() {
           <button 
             onClick={() => setActiveTab('tools')}
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all text-sm",
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
               activeTab === 'tools' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
             )}
           >
@@ -407,7 +386,7 @@ export default function App() {
           <button 
             onClick={() => setActiveTab('notes')}
             className={cn(
-              "w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all text-sm",
+              "w-full h-9 flex items-center gap-3 px-3 rounded-md transition-all text-sm",
               activeTab === 'notes' ? "bg-gray-800/20 text-white border border-gray-800/50" : "hover:bg-gray-800/10 text-gray-300"
             )}
           >
@@ -428,30 +407,6 @@ export default function App() {
             />
           </div>
           
-          <div className="space-y-2">
-            <label className="text-xs uppercase opacity-50 font-bold">思考模式</label>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-gray-300">启用</p>
-              <input
-                type="checkbox"
-                checked={enableThoughts}
-                onChange={(e) => setEnableThoughts(e.target.checked)}
-                className="h-4 w-4"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-xs uppercase opacity-50 font-bold">Streaming</label>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-gray-300">Enable token stream</p>
-              <input
-                type="checkbox"
-                checked={enableStreaming}
-                onChange={(e) => setEnableStreaming(e.target.checked)}
-                className="h-4 w-4"
-              />
-            </div>
-          </div>
           <div className="text-[10px] text-gray-600 leading-tight">
             状态: 本地连接 <br/>
             安全: 是
@@ -479,9 +434,10 @@ export default function App() {
               </div>
               <button
                 onClick={createConversation}
-                className="text-xs text-white hover:text-gray-300"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-700/50 bg-black/40 px-3 text-xs text-gray-200 transition-colors hover:border-gray-500/70 hover:bg-gray-800/30 hover:text-white"
               >
-                新建对话
+                <Plus className="h-3.5 w-3.5" />
+                <span>新建对话</span>
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-green-900 scrollbar-track-transparent">
@@ -507,13 +463,13 @@ export default function App() {
                       ? "bg-red-900/10 border-red-500/30 text-red-400 font-bold text-xs w-full text-center"
                       : "bg-black/50 border-gray-800/30 text-white"
                   )}>
-                    {msg.content}
                     {msg.thoughts && (
-                      <div className="mt-2 text-xs italic text-gray-300/70">
+                      <div className="mb-2 text-xs text-gray-300/80 leading-relaxed">
                         思考过程：
                         <pre className="whitespace-pre-wrap">{msg.thoughts}</pre>
                       </div>
                     )}
+                    {msg.content}
                   </div>
                   {msg.role !== 'system' && (
                     <span className="text-[10px] opacity-30 mt-1 uppercase">{msg.role} // {new Date(msg.timestamp).toLocaleTimeString()}</span>
@@ -537,7 +493,7 @@ export default function App() {
                   <button
                     key={i}
                     onClick={() => setInput(t.prompt)}
-                    className="whitespace-nowrap px-3 py-1 border border-gray-800/30 rounded-full text-xs text-gray-300 hover:bg-gray-800/20 hover:text-white transition-colors"
+                    className="whitespace-nowrap h-8 px-3 border border-gray-700/40 rounded-md text-xs text-gray-300 hover:bg-gray-800/20 hover:text-white transition-colors"
                   >
                     {t.label}
                   </button>
@@ -551,12 +507,12 @@ export default function App() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSend(input)}
                   placeholder="输入指令或查询..."
-                  className="flex-1 bg-black/50 border border-gray-800/50 rounded-md px-4 py-2 text-white focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-500/50 placeholder:text-gray-900"
+                  className="flex-1 bg-black/50 border border-gray-800/50 rounded-md px-4 py-2 text-white focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-500/50 placeholder:text-gray-400"
                 />
                 <button 
                   onClick={() => handleSend(input)}
                   disabled={isLoading}
-                  className="bg-gray-800/20 hover:bg-gray-800/40 border border-gray-500/30 text-white px-4 py-2 rounded-md transition-colors disabled:opacity-50"
+                  className="h-10 w-10 flex items-center justify-center bg-gray-800/20 hover:bg-gray-800/40 border border-gray-500/30 text-white rounded-md transition-colors disabled:opacity-50"
                 >
                   <Send className="w-4 h-4" />
                 </button>
