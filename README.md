@@ -65,6 +65,14 @@ http://localhost:3000
 
 启动成功后，你会看到聊天界面和默认欢迎消息。
 
+### Windows 用户（双击启动，推荐）
+
+如果你习惯双击启动：
+- 双击 `start-server.bat`：会优先用 **Windows Terminal** 打开一个更美观的窗口，并自动打开浏览器
+- 双击 `stop-server.bat`：会按端口 `3000` 精确停止本项目服务
+
+> 如果你安装了 Windows Terminal，启动体验会比传统黑框 `cmd` 更好。
+
 ---
 
 ## 3. 首次使用怎么确认“真的跑通”
