@@ -1,6 +1,6 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import axios from "axios";
+import path from "path";
 
 const PORT = 3000;
 
@@ -161,15 +161,20 @@ async function startServer() {
     }
   });
 
-  if (process.env.NODE_ENV !== "production") {
+  const isPkg = typeof (process as any).pkg !== "undefined";
+
+  if (process.env.NODE_ENV !== "production" && !isPkg) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
-    const path = await import("path");
-    app.use(express.static(path.resolve("dist")));
+    const distPath = isPkg
+      ? path.join(path.dirname(process.execPath), "dist")
+      : path.resolve(process.cwd(), "dist");
+    app.use(express.static(distPath));
   }
 
   app.listen(PORT, "0.0.0.0", () => {
