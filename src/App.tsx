@@ -12,7 +12,7 @@ type Message = {
   timestamp: number;
 };
 
-type ToolType = 'base64' | 'hex' | 'rot13' | 'url';
+type ToolType = 'base64' | 'hex' | 'url' | 'binary' | 'ascii' | 'morse' | 'rot13' | 'rot47';
 
 const INITIAL_SYSTEM_MESSAGE = `你好，我是 CTF 解题助手。我可以协助代码审计、逆向分析、编码/加密识别、Linux 提权排查和流量分析；直接贴题目现象、代码或数据即可开始。`;
 
@@ -482,7 +482,7 @@ export default function App() {
     }
   };
 
-  const runTool = (action: 'encode' | 'decode' | 'process') => {
+  const runTool = (action: 'encode' | 'decode') => {
     let result = '';
     switch (activeTool) {
       case 'base64':
@@ -491,8 +491,20 @@ export default function App() {
       case 'hex':
         result = action === 'encode' ? tools.hex.encode(toolInput) : tools.hex.decode(toolInput);
         break;
+      case 'binary':
+        result = action === 'encode' ? tools.binary.encode(toolInput) : tools.binary.decode(toolInput);
+        break;
+      case 'ascii':
+        result = action === 'encode' ? tools.ascii.encode(toolInput) : tools.ascii.decode(toolInput);
+        break;
+      case 'morse':
+        result = action === 'encode' ? tools.morse.encode(toolInput) : tools.morse.decode(toolInput);
+        break;
       case 'rot13':
-        result = tools.rot13(toolInput);
+        result = action === 'encode' ? tools.rot13.encode(toolInput) : tools.rot13.decode(toolInput);
+        break;
+      case 'rot47':
+        result = action === 'encode' ? tools.rot47.encode(toolInput) : tools.rot47.decode(toolInput);
         break;
       case 'url':
         result = action === 'encode' ? tools.url.encode(toolInput) : tools.url.decode(toolInput);
@@ -843,7 +855,7 @@ export default function App() {
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                {(['base64', 'hex', 'rot13', 'url'] as ToolType[]).map((t) => (
+                {(['base64', 'hex', 'url', 'binary', 'ascii', 'morse', 'rot13', 'rot47'] as ToolType[]).map((t) => (
                   <button
                     key={t}
                     onClick={() => setActiveTool(t)}
@@ -871,29 +883,18 @@ export default function App() {
                 </div>
 
                 <div className="flex gap-4">
-                  {activeTool !== 'rot13' ? (
-                    <>
-                      <button 
-                        onClick={() => runTool('encode')}
-                        className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
-                      >
-                        编码
-                      </button>
-                      <button 
-                        onClick={() => runTool('decode')}
-                        className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
-                      >
-                        解码
-                      </button>
-                    </>
-                  ) : (
-                    <button 
-                      onClick={() => runTool('process')}
-                      className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
-                    >
-                      应用 ROT13
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => runTool('encode')}
+                    className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
+                  >
+                    编码
+                  </button>
+                  <button 
+                    onClick={() => runTool('decode')}
+                    className="flex-1 bg-green-900/20 hover:bg-green-900/30 border border-green-500/30 py-2 rounded text-sm uppercase tracking-widest transition-all"
+                  >
+                    解码
+                  </button>
                 </div>
 
                 <div className="space-y-2">

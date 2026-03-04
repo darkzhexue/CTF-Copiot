@@ -40,16 +40,130 @@ export const tools = {
       }
     }
   },
-  rot13: (input: string) => {
-    return input.replace(/[a-zA-Z]/g, (char) => {
-      const base = char <= 'Z' ? 65 : 97;
-      return String.fromCharCode(
-        ((char.charCodeAt(0) - base + 13) % 26) + base
-      );
-    });
+  binary: {
+    encode: (input: string) => {
+      return input
+        .split('')
+        .map((char) => char.charCodeAt(0).toString(2).padStart(8, '0'))
+        .join(' ');
+    },
+    decode: (input: string) => {
+      try {
+        const chunks = input.trim().split(/\s+/).filter(Boolean);
+        if (!chunks.length) return '';
+        if (!chunks.every((chunk) => /^[01]{1,8}$/.test(chunk))) {
+          return '错误：无效的二进制字符串';
+        }
+        return chunks
+          .map((chunk) => String.fromCharCode(parseInt(chunk, 2)))
+          .join('');
+      } catch {
+        return '错误：无效的二进制字符串';
+      }
+    }
+  },
+  ascii: {
+    encode: (input: string) => {
+      return input
+        .split('')
+        .map((char) => String(char.charCodeAt(0)))
+        .join(' ');
+    },
+    decode: (input: string) => {
+      try {
+        const nums = input.trim().split(/\s+/).filter(Boolean);
+        if (!nums.length) return '';
+        if (!nums.every((n) => /^\d{1,3}$/.test(n) && Number(n) >= 0 && Number(n) <= 255)) {
+          return '错误：无效的 ASCII 数字序列';
+        }
+        return nums
+          .map((n) => String.fromCharCode(Number(n)))
+          .join('');
+      } catch {
+        return '错误：无效的 ASCII 数字序列';
+      }
+    }
+  },
+  morse: {
+    encode: (input: string) => {
+      const table: Record<string, string> = {
+        a: '.-', b: '-...', c: '-.-.', d: '-..', e: '.', f: '..-.', g: '--.', h: '....', i: '..', j: '.---',
+        k: '-.-', l: '.-..', m: '--', n: '-.', o: '---', p: '.--.', q: '--.-', r: '.-.', s: '...', t: '-',
+        u: '..-', v: '...-', w: '.--', x: '-..-', y: '-.--', z: '--..',
+        '0': '-----', '1': '.----', '2': '..---', '3': '...--', '4': '....-', '5': '.....', '6': '-....',
+        '7': '--...', '8': '---..', '9': '----.',
+        '.': '.-.-.-', ',': '--..--', '?': '..--..', '!': '-.-.--', '/': '-..-.', '(': '-.--.', ')': '-.--.-',
+        '&': '.-...', ':': '---...', ';': '-.-.-.', '=': '-...-', '+': '.-.-.', '-': '-....-', '_': '..--.-',
+        '"': '.-..-.', '$': '...-..-', '@': '.--.-.'
+      };
+      return input
+        .toLowerCase()
+        .split('')
+        .map((ch) => {
+          if (ch === ' ') return '/';
+          return table[ch] || '?';
+        })
+        .join(' ');
+    },
+    decode: (input: string) => {
+      try {
+        const table: Record<string, string> = {
+          '.-': 'a', '-...': 'b', '-.-.': 'c', '-..': 'd', '.': 'e', '..-.': 'f', '--.': 'g', '....': 'h', '..': 'i', '.---': 'j',
+          '-.-': 'k', '.-..': 'l', '--': 'm', '-.': 'n', '---': 'o', '.--.': 'p', '--.-': 'q', '.-.': 'r', '...': 's', '-': 't',
+          '..-': 'u', '...-': 'v', '.--': 'w', '-..-': 'x', '-.--': 'y', '--..': 'z',
+          '-----': '0', '.----': '1', '..---': '2', '...--': '3', '....-': '4', '.....': '5', '-....': '6', '--...': '7', '---..': '8', '----.': '9',
+          '.-.-.-': '.', '--..--': ',', '..--..': '?', '-.-.--': '!', '-..-.': '/', '-.--.': '(', '-.--.-': ')', '.-...': '&',
+          '---...': ':', '-.-.-.': ';', '-...-': '=', '.-.-.': '+', '-....-': '-', '..--.-': '_', '.-..-.': '"', '...-..-': '$', '.--.-.': '@'
+        };
+        const symbols = input.trim().split(/\s+/).filter(Boolean);
+        if (!symbols.length) return '';
+        return symbols
+          .map((sym) => {
+            if (sym === '/') return ' ';
+            return table[sym] || '?';
+          })
+          .join('');
+      } catch {
+        return '错误：无效的摩斯码';
+      }
+    }
+  },
+  rot13: {
+    encode: (input: string) => {
+      return input.replace(/[a-zA-Z]/g, (char) => {
+        const base = char <= 'Z' ? 65 : 97;
+        return String.fromCharCode(((char.charCodeAt(0) - base + 13) % 26) + base);
+      });
+    },
+    decode: (input: string) => {
+      return input.replace(/[a-zA-Z]/g, (char) => {
+        const base = char <= 'Z' ? 65 : 97;
+        return String.fromCharCode(((char.charCodeAt(0) - base + 13) % 26) + base);
+      });
+    }
+  },
+  rot47: {
+    encode: (input: string) => {
+      return input.replace(/[!-~]/g, (char) => {
+        const code = char.charCodeAt(0);
+        return String.fromCharCode(33 + ((code - 33 + 47) % 94));
+      });
+    },
+    decode: (input: string) => {
+      return input.replace(/[!-~]/g, (char) => {
+        const code = char.charCodeAt(0);
+        return String.fromCharCode(33 + ((code - 33 + 47) % 94));
+      });
+    }
   },
   url: {
     encode: (input: string) => encodeURIComponent(input),
-    decode: (input: string) => decodeURIComponent(input)
+    decode: (input: string) => {
+      try {
+        return decodeURIComponent(input);
+      } catch {
+        return '错误：无效的 URL 编码字符串';
+      }
+    }
   }
 };
