@@ -2,12 +2,12 @@
 setlocal
 cd /d "%~dp0"
 
-echo 启动开发服务...
+echo starting CTF Pilot development server...
 start "CTF Pilot Dev" powershell -NoLogo -NoExit -Command "Set-Location '%~dp0'; npm run dev"
 
 timeout /t 2 >nul
 start "" "http://localhost:3000"
 
-echo 已启动，浏览器已打开 http://localhost:3000
-echo 如需停止服务，请双击 stop-server.bat
+echo Server started, browser opened at http://localhost:3000
+echo To stop the server, double-click stop-server.bat
 endlocal

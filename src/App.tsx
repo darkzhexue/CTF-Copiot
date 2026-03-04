@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2 } from 'lucide-react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -9,6 +9,8 @@ type Message = {
   role: 'user' | 'assistant' | 'system';
   content: string;
   thoughts?: string; // optional chain-of-thought or reasoning
+  thoughtsStartedAt?: number;
+  thoughtsEndedAt?: number;
   timestamp: number;
 };
 
@@ -76,10 +78,13 @@ export default function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string>('');
+  const [collapsedThoughts, setCollapsedThoughts] = useState<Record<string, boolean>>({});
+  const [timerNow, setTimerNow] = useState<number>(Date.now());
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const shouldAutoScrollRef = useRef(true);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
+  const activeConvIdRef = useRef(activeConvId);
  
   // 思考模式开关（是否请求模型输出带有思考链）
   const [enableThoughts] = useState(true);
@@ -149,10 +154,27 @@ export default function App() {
           const nextActiveConvId = savedActiveConvId && parsed.some(c => c.id === savedActiveConvId)
             ? savedActiveConvId
             : parsed[0].id;
-          setConversations(parsed);
-          setActiveConvId(nextActiveConvId);
           const activeConv = parsed.find(c => c.id === nextActiveConvId) || parsed[0];
-          setMessages(activeConv.messages);
+          const hasDialogHistory = activeConv.messages.some((msg) => {
+            if (msg.role === 'user') return true;
+            if (msg.role === 'assistant' && msg.content !== INITIAL_SYSTEM_MESSAGE) return true;
+            return false;
+          });
+
+          if (hasDialogHistory) {
+            const freshDefaultConv: Conversation = {
+              id: Date.now().toString(),
+              name: '默认会话',
+              messages: [{ role: 'assistant', content: INITIAL_SYSTEM_MESSAGE, timestamp: Date.now() }]
+            };
+            setConversations([freshDefaultConv, ...parsed]);
+            setActiveConvId(freshDefaultConv.id);
+            setMessages(freshDefaultConv.messages);
+          } else {
+            setConversations(parsed);
+            setActiveConvId(nextActiveConvId);
+            setMessages(activeConv.messages);
+          }
         }
       }
     } catch {}
@@ -170,6 +192,14 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
+    if (!isLoading) return;
+    const timer = setInterval(() => {
+      setTimerNow(Date.now());
+    }, 100);
+    return () => clearInterval(timer);
+  }, [isLoading]);
+
+  useEffect(() => {
     // whenever conversations change, persist
     if (!hasHydratedConversations) return;
     localStorage.setItem('ctf_conversations', JSON.stringify(conversations));
@@ -179,6 +209,10 @@ export default function App() {
     if (!hasHydratedConversations) return;
     localStorage.setItem('ctf_active_conv_id', activeConvId);
   }, [activeConvId, hasHydratedConversations]);
+
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
 
   useEffect(() => {
     try {
@@ -199,6 +233,23 @@ export default function App() {
       setMessages(conv.messages);
     }
   }, [activeConvId, conversations]);
+
+  const applyConversationMessages = (
+    conversationId: string,
+    updater: (prevMessages: Message[]) => Message[]
+  ) => {
+    let nextMessages: Message[] | null = null;
+    setConversations((prevConversations) =>
+      prevConversations.map((conversation) => {
+        if (conversation.id !== conversationId) return conversation;
+        nextMessages = updater(conversation.messages);
+        return { ...conversation, messages: nextMessages };
+      })
+    );
+    if (nextMessages && activeConvIdRef.current === conversationId) {
+      setMessages(nextMessages);
+    }
+  };
 
   const createConversation = () => {
     const id = Date.now().toString();
@@ -284,19 +335,17 @@ export default function App() {
   const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
     shouldAutoScrollRef.current = true;
+    const requestConvId = activeConvIdRef.current;
+    const baseMessages = conversations.find(c => c.id === requestConvId)?.messages ?? messages;
     const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
-    setMessages(prev => {
-      const updated = [...prev, userMsg];
-      setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
-      return updated;
-    });
+    applyConversationMessages(requestConvId, (prev) => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
     const requestController = new AbortController();
     activeRequestControllerRef.current = requestController;
     try {
       const endpoint = '/api/ollama/chat';
-      const outgoing = [...messages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const outgoing = [...baseMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
       const payload = {
         model: ollamaModel,
         messages: outgoing,
@@ -316,21 +365,23 @@ export default function App() {
         }
         let pendingContent = '';
         let pendingThoughts = '';
+        let pendingThoughtStartedAt: number | undefined;
+        let pendingThoughtEndedAt: number | undefined;
         let charQueue = '';
         let streamEnded = false;
         let typingTimer: ReturnType<typeof setInterval> | null = null;
         const updateAssistantMessage = () => {
-          setMessages(prev => {
+          applyConversationMessages(requestConvId, (prev) => {
             const last = prev[prev.length - 1];
             if (!last || last.role !== 'assistant') return prev;
             const updatedLast: Message = {
               ...last,
               content: pendingContent,
-              ...(pendingThoughts ? { thoughts: pendingThoughts } : {})
+              ...(pendingThoughts ? { thoughts: pendingThoughts } : {}),
+              ...(pendingThoughtStartedAt ? { thoughtsStartedAt: pendingThoughtStartedAt } : {}),
+              ...(pendingThoughtEndedAt ? { thoughtsEndedAt: pendingThoughtEndedAt } : {})
             };
-            const updated = [...prev.slice(0, -1), updatedLast];
-            setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
-            return updated;
+            return [...prev.slice(0, -1), updatedLast];
           });
         };
         const ensureTypingTimer = () => {
@@ -349,11 +400,9 @@ export default function App() {
             updateAssistantMessage();
           }, 12);
         };
-        setMessages(prev => {
+        applyConversationMessages(requestConvId, (prev) => {
           const assistantMsg: Message = { role: 'assistant', content: '', timestamp: Date.now() };
-          const updated = [...prev, assistantMsg];
-          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
-          return updated;
+          return [...prev, assistantMsg];
         });
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -378,6 +427,9 @@ export default function App() {
                 obj?.reasoning ??
                 '';
               if (thoughtChunk) {
+                if (!pendingThoughtStartedAt) {
+                  pendingThoughtStartedAt = Date.now();
+                }
                 const nextThoughts = String(thoughtChunk);
                 if (nextThoughts.startsWith(pendingThoughts)) {
                   pendingThoughts = nextThoughts;
@@ -388,6 +440,9 @@ export default function App() {
               }
             }
             if (obj?.done) {
+              if (pendingThoughtStartedAt && !pendingThoughtEndedAt) {
+                pendingThoughtEndedAt = Date.now();
+              }
               streamEnded = true;
               ensureTypingTimer();
             }
@@ -409,6 +464,9 @@ export default function App() {
           processStreamLine(buffer.trim());
         }
         streamEnded = true;
+        if (pendingThoughtStartedAt && !pendingThoughtEndedAt) {
+          pendingThoughtEndedAt = Date.now();
+        }
         ensureTypingTimer();
         await new Promise<void>((resolve) => {
           const waitUntilComplete = () => {
@@ -452,23 +510,28 @@ export default function App() {
         if (!enableThoughts) {
           thoughts = undefined;
         }
+        const messageTimestamp = Date.now();
         const assistantMsg: Message = {
           role: 'assistant',
           content,
-          timestamp: Date.now(),
-          ...(thoughts ? { thoughts } : {})
+          timestamp: messageTimestamp,
+          ...(thoughts
+            ? { thoughts, thoughtsStartedAt: messageTimestamp, thoughtsEndedAt: messageTimestamp }
+            : {})
         };
-        setMessages(prev => {
-          const updated = [...prev, assistantMsg];
-          setConversations(convs => convs.map(c => c.id === activeConvId ? { ...c, messages: updated } : c));
-          return updated;
-        });
+        applyConversationMessages(requestConvId, (prev) => [...prev, assistantMsg]);
       }
     } catch (error: any) {
       if (error?.name === 'AbortError') {
+        applyConversationMessages(requestConvId, (prev) => {
+          const last = prev[prev.length - 1];
+          if (!last || last.role !== 'assistant' || !last.thoughts || last.thoughtsEndedAt) return prev;
+          const updatedLast: Message = { ...last, thoughtsEndedAt: Date.now() };
+          return [...prev.slice(0, -1), updatedLast];
+        });
         return;
       }
-      setMessages(prev => [...prev, {
+      applyConversationMessages(requestConvId, (prev) => [...prev, {
         role: 'system',
         content: `Error: ${error?.message || String(error)}. Ensure Ollama is running on http://localhost:11434`,
         timestamp: Date.now()
@@ -547,6 +610,15 @@ export default function App() {
   }, [conversations]);
 
   const activeConversation = conversations.find(c => c.id === activeConvId);
+
+  const getMessageKey = (msg: Message, idx: number) => `${msg.timestamp}-${msg.role}-${idx}`;
+
+  const getThoughtElapsed = (msg: Message) => {
+    if (!msg.thoughtsStartedAt) return null;
+    const endAt = msg.thoughtsEndedAt ?? timerNow;
+    const elapsed = Math.max(0, (endAt - msg.thoughtsStartedAt) / 1000);
+    return elapsed.toFixed(1);
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-mono selection:bg-gray-700 selection:text-white flex flex-col md:flex-row overflow-hidden">
@@ -761,7 +833,7 @@ export default function App() {
                 <motion.div 
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  key={idx} 
+                  key={idx}
                   className={cn(
                     "flex flex-col max-w-3xl",
                     msg.role === 'user'
@@ -781,8 +853,36 @@ export default function App() {
                   )}>
                     {msg.thoughts && (
                       <div className="mb-2 text-xs text-gray-300/80 leading-relaxed">
-                        思考过程：
-                        <pre className="whitespace-pre-wrap">{msg.thoughts}</pre>
+                        {(() => {
+                          const messageKey = getMessageKey(msg, idx);
+                          const thoughtsCollapsed = collapsedThoughts[messageKey] ?? true;
+                          const thoughtElapsed = getThoughtElapsed(msg);
+                          return (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setCollapsedThoughts(prev => ({ ...prev, [messageKey]: !thoughtsCollapsed }))}
+                                className="mb-1 inline-flex items-center gap-1 text-gray-300/80 hover:text-gray-100 transition-colors"
+                              >
+                                {thoughtsCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                <span>思考过程{thoughtElapsed ? ` (${thoughtElapsed}s)` : ''}</span>
+                              </button>
+                              <AnimatePresence initial={false}>
+                                {!thoughtsCollapsed && (
+                                  <motion.pre
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    transition={{ duration: 0.16 }}
+                                    className="overflow-hidden whitespace-pre-wrap"
+                                  >
+                                    {msg.thoughts}
+                                  </motion.pre>
+                                )}
+                              </AnimatePresence>
+                            </>
+                          );
+                        })()}
                       </div>
                     )}
                     {msg.content}

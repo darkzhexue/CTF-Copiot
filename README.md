@@ -1,233 +1,213 @@
 # CTF Pilot（Ollama 本地版）
 
-一个可本地运行的 CTF 助手，支持：
-- 本机 Ollama 模型对话（流式返回）
-- 模型列表读取与切换
+本项目是一个可本地运行的 CTF 助手，前后端同端口提供服务：`http://localhost:3000`。
+
+支持能力：
+- 本机 Ollama 对话（流式返回）
+- 本地模型列表读取与切换
 - 手动中断当前生成
-- 前后端同端口（`http://localhost:3000`）
+- Windows 一键安装 / 启动 / 停止 / 打包（4 个 bat）
 
 ---
 
 ## 目录
 
-- [1. 运行方式总览](#1-运行方式总览)
-- [2. 环境与依赖要求](#2-环境与依赖要求)
-- [3. 已打包版本使用教程（给最终用户）](#3-已打包版本使用教程给最终用户)
-- [4. 源码开发教程（给开发者）](#4-源码开发教程给开发者)
-- [5. 打包发布教程（生成 exe）](#5-打包发布教程生成-exe)
-- [6. 项目脚本说明](#6-项目脚本说明)
-- [7. 目录结构说明](#7-目录结构说明)
+- [1. 先看这个：四个 bat 怎么用](#1-先看这个四个-bat-怎么用)
+- [2. 项目怎么跑起来（开发模式）](#2-项目怎么跑起来开发模式)
+- [3. 怎么重新打包（生成 exe）](#3-怎么重新打包生成-exe)
+- [4. 给最终用户的运行方式（不改代码）](#4-给最终用户的运行方式不改代码)
+- [5. 环境要求](#5-环境要求)
+- [6. 常用 npm 脚本](#6-常用-npm-脚本)
+- [7. 目录结构](#7-目录结构)
 - [8. 常见问题排查](#8-常见问题排查)
 
 ---
 
-## 1. 运行方式总览
+## 1. 先看这个：四个 bat 怎么用
 
-本项目有两种使用方式：
+项目根目录包含 4 个 Windows 批处理脚本：
 
-1. **已打包版（推荐给普通使用者）**
-   - 直接使用 `release/CTF Pilot.exe`
-   - 不需要 Node.js
-   - 仍然需要本机 Ollama + 模型
+### 1) `first-install.bat`（首次安装 + 启动）
 
-2. **源码开发版（推荐给开发者）**
-   - 使用 `npm run dev` 运行 Express + Vite
-   - 支持前端/后端联调与代码修改
+用途：给新环境第一次用时准备依赖并启动开发服务。
+
+执行后会做：
+1. 检测 `node` / `npm` 是否存在
+2. 如果没有 `node_modules`，自动执行 `npm install`
+3. 调用 `start-server.bat` 启动开发服务
+
+适用场景：你刚拉下项目，准备第一次跑源码。
 
 ---
 
-## 2. 环境与依赖要求
+### 2) `start-server.bat`（启动开发服务）
 
-### 必需
+用途：快速启动开发模式，并自动打开浏览器。
 
-1) **Ollama（必须安装并运行）**
-- 默认地址：`http://localhost:11434`
-- 检查命令：
+执行后会做：
+1. 新开 PowerShell 窗口
+2. 运行 `npm run dev`
+3. 自动打开 `http://localhost:3000`
+
+适用场景：依赖已安装，日常开发启动。
+
+---
+
+### 3) `stop-server.bat`（停止开发服务）
+
+用途：停止占用 `3000` 端口的服务进程。
+
+执行后会做：
+1. 查找本机监听 3000 端口的进程
+2. 强制停止对应 PID
+
+适用场景：服务未正常退出、端口被占用时。
+
+---
+
+### 4) `pack-exe.bat`（一键重新打包）
+
+用途：一键构建发布包（`exe + dist`），带完整回显。
+
+执行后会做：
+1. 检测 `node` / `npm`
+2. 自动安装依赖（缺失时）
+3. 执行 `npm run pack:exe`
+4. 校验 `release/CTF Pilot.exe` 与 `release/dist/`
+
+适用场景：你要给别人发可执行版本，或重新发布新版本。
+
+---
+
+## 2. 项目怎么跑起来（开发模式）
+
+### 方案 A（推荐，最省事）
+
+1. 双击 `first-install.bat`
+2. 等待安装和启动完成
+3. 浏览器打开后访问：`http://localhost:3000`
+
+### 方案 B（手动命令行）
+
+```bash
+npm install
+npm run dev
+```
+
+然后访问：`http://localhost:3000`
+
+### 关闭服务
+
+- 双击 `stop-server.bat`
+
+---
+
+## 3. 怎么重新打包（生成 exe）
+
+### 方式 A（推荐）
+
+直接双击：`pack-exe.bat`
+
+或在终端执行：
+
+```bash
+pack-exe.bat
+```
+
+### 方式 B（npm 命令）
+
+```bash
+npm run pack:exe
+```
+
+### 成功后产物
+
+- `release/CTF Pilot.exe`
+- `release/dist/`
+
+> 注意：`CTF Pilot.exe` 和 `dist` 必须保持同级目录。
+
+---
+
+## 4. 给最终用户的运行方式（不改代码）
+
+适合普通使用者（不需要 Node.js）：
+
+1. 确保已安装并运行 Ollama
+2. 确保至少有一个本地模型（例如 `qwen3:8b`）
+3. 进入 `release/` 目录，双击 `CTF Pilot.exe`
+4. 打开 `http://localhost:3000`
+
+---
+
+## 5. 环境要求
+
+### 必需（开发和已打包版都需要）
+
+1) **Ollama 已安装并运行**
 
 ```bash
 ollama --version
 ollama list
 ```
 
-2) **至少一个模型（必须）**
-- 示例：
+2) **至少一个本地模型**
 
 ```bash
 ollama pull qwen3:8b
 ```
 
-### 仅源码开发需要
+### 仅源码开发/打包需要
 
 1) **Node.js 20+**
-- 检查命令：
 
 ```bash
 node -v
 npm -v
 ```
 
-2) **npm 依赖（项目内）**
-- 首次开发前安装：
-
-```bash
-npm install
-```
-
-> 说明：项目依赖已在 `package.json` 中声明，包含 React、Vite、Express、TypeScript、axios、tailwind 等。
-
 ---
 
-## 3. 已打包版本使用教程（给最终用户）
-
-适合“不改代码，只要能用”的场景。
-
-### 第 1 步：准备 Ollama 和模型
+## 6. 常用 npm 脚本
 
 ```bash
-ollama list
-```
-
-如果为空，先拉模型：
-
-```bash
-ollama pull qwen3:8b
-```
-
-### 第 2 步：进入发布目录并启动
-
-- 确保目录中存在：
-   - `release/CTF Pilot.exe`
-  - `release/dist/`（前端静态文件）
-
-- 双击运行 `CTF Pilot.exe`，或在终端执行：
-
-```bash
-cd release
-./CTF Pilot.exe
-```
-
-启动后访问：
-
-```text
-http://localhost:3000
-```
-
-### 第 3 步：验证是否可用
-
-1. 模型下拉框可看到本地模型
-2. 发送“你好”后出现流式回复
-3. 可通过“停止”按钮中断当前回答
-
----
-
-## 4. 源码开发教程（给开发者）
-
-### 第 1 步：安装依赖
-
-在项目根目录执行：
-
-```bash
-npm install
-```
-
-### 第 2 步：启动开发服务
-
-```bash
-npm run dev
-```
-
-服务地址：
-
-```text
-http://localhost:3000
-```
-
-开发模式下：
-- 后端：`server.ts`（Express）
-- 前端：Vite 中间件挂载到同一服务
-
-### Windows 快速启动（可选）
-
-- 双击 `start-server.bat` 启动并自动打开浏览器
-- 双击 `stop-server.bat` 按端口 `3000` 停止服务
-
-### 可选环境变量
-
-默认 Ollama 地址为 `http://localhost:11434`。
-
-若 Ollama 不在默认地址，设置：`OLLAMA_BASE_URL`
-
-PowerShell 示例：
-
-```powershell
-$env:OLLAMA_BASE_URL="http://127.0.0.1:11434"
-npm run dev
-```
-
----
-
-## 5. 打包发布教程（生成 exe）
-
-### 一键打包
-
-```bash
-npm run pack:exe
-```
-
-该命令会依次执行：
-1. `npm run build`：打包前端到 `dist/`
-2. `npm run build:server:exe`：将 `server.ts` 打包为 `build/server.cjs`
-3. `pkg ...`：生成 `release/CTF Pilot.exe`
-4. `npm run copy:dist:exe`：复制 `dist/` 到 `release/dist/`
-
-### 发布产物
-
-- `release/CTF Pilot.exe`
-- `release/dist/`
-
-> 两者需保持同级目录，exe 才能正确提供前端页面。
-
----
-
-## 6. 项目脚本说明
-
-```bash
-npm run dev            # 开发模式：启动 Express + Vite 中间件
-npm run build          # 打包前端到 dist
-npm run preview        # 预览前端打包产物（Vite）
-npm run lint           # TypeScript 类型检查（tsc --noEmit）
-npm run build:server:exe  # 打包 server.ts 为 build/server.cjs
+npm run dev               # 开发模式：Express + Vite 中间件
+npm run build             # 打包前端到 dist
+npm run preview           # 预览前端打包产物
+npm run lint              # TypeScript 类型检查
+npm run build:server:exe  # 打包 server.ts 到 build/server.cjs
 npm run copy:dist:exe     # 复制 dist 到 release/dist
 npm run pack:exe          # 一键生成 exe 发布包
 ```
 
 ---
 
-## 7. 目录结构说明
+## 7. 目录结构
 
 ```text
 .
-├─ server.ts                 # Express 服务入口（API + 静态资源）
-├─ src/                      # React 前端源码
-├─ dist/                     # 前端打包产物（build 后生成）
-├─ build/server.cjs          # 服务端打包文件（build:server:exe 后生成）
-├─ release/                  # 发布目录
+├─ server.ts
+├─ src/
+├─ dist/                  # 前端构建产物
+├─ build/server.cjs       # 服务端打包产物
+├─ release/
 │  ├─ CTF Pilot.exe
 │  └─ dist/
-├─ start-server.bat          # Windows 开发启动脚本
-└─ stop-server.bat           # Windows 停止脚本（按端口 3000）
+├─ first-install.bat      # 首次安装并启动开发服务
+├─ start-server.bat       # 启动开发服务
+├─ stop-server.bat        # 停止 3000 端口服务
+└─ pack-exe.bat           # 一键打包发布
 ```
 
 ---
 
 ## 8. 常见问题排查
 
-### 1) 页面能打开，但提示连接 Ollama 失败
+### 1) 页面提示连接 Ollama 失败
 
 检查：
-- Ollama 是否运行
-- `OLLAMA_BASE_URL` 是否正确
-- `http://localhost:11434` 是否可访问
+- Ollama 是否启动
+- `OLLAMA_BASE_URL` 是否正确（默认 `http://localhost:11434`）
 
 快速验证：
 
@@ -235,11 +215,9 @@ npm run pack:exe          # 一键生成 exe 发布包
 ollama list
 ```
 
-### 2) 模型列表为空
+---
 
-常见原因：
-- 本机未安装任何模型
-- Ollama 未启动
+### 2) 模型列表为空
 
 处理：
 
@@ -248,16 +226,23 @@ ollama pull qwen3:8b
 ollama list
 ```
 
-### 3) 可以发送消息，但模型不回复
+---
+
+### 3) 双击 bat 没反应 / 一闪而过
+
+建议：
+- 用“以管理员身份运行”重试
+- 在 PowerShell 里手动执行脚本查看输出
+- 检查是否被安全软件拦截
+
+---
+
+### 4) `exe` 能启动但页面空白
 
 检查：
-- 选中的模型名是否真实存在
-- 开发模式终端日志是否有报错
-- 浏览器 Network 中 `/api/ollama/chat` 是否返回 5xx
+- `release/CTF Pilot.exe` 和 `release/dist/` 是否同级
+- `release/dist/index.html` 是否存在
 
-### 4) exe 能启动但页面空白
-
-检查 `release/dist/` 是否与 `release/CTF Pilot.exe` 同级存在。
 
 ---
 
