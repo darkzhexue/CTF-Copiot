@@ -76,7 +76,9 @@ export default function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string>('');
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
  
   // 思考模式开关（是否请求模型输出带有思考链）
@@ -90,8 +92,15 @@ export default function App() {
   // Notes State
   const [notes, setNotes] = useState<string>('# CTF 作战笔记\n\n- 目标 IP: \n- 发现端口: \n- Flag: \n');
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  };
+
+  const updateAutoScrollState = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollRef.current = distanceToBottom <= 80;
   };
 
   const loadOllamaModels = async () => {
@@ -155,7 +164,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    scrollToBottom();
+    if (shouldAutoScrollRef.current) {
+      scrollToBottom();
+    }
   }, [messages]);
 
   useEffect(() => {
@@ -272,6 +283,7 @@ export default function App() {
 
   const handleSend = async (text: string = input) => {
     if (!text.trim()) return;
+    shouldAutoScrollRef.current = true;
     const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
     setMessages(prev => {
       const updated = [...prev, userMsg];
@@ -728,7 +740,11 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-green-900 scrollbar-track-transparent">
+            <div
+              ref={messagesContainerRef}
+              onScroll={updateAutoScrollState}
+              className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-green-900 scrollbar-track-transparent"
+            >
               {messages.map((msg, idx) => (
                 <motion.div 
                   initial={{ opacity: 0, y: 10 }}
