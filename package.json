@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "ctf-pilot",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit",
     "build:server:exe": "esbuild server.ts --bundle --platform=node --format=cjs --external:vite --outfile=build/server.cjs",
     "copy:dist:exe": "powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path release/dist | Out-Null; Copy-Item -Recurse -Force dist/* release/dist/\"",
-    "pack:exe": "npm run build && npm run build:server:exe && pkg build/server.cjs --targets node18-win-x64 --output release/ctf-assistant.exe && npm run copy:dist:exe"
+    "pack:exe": "npm run build && npm run build:server:exe && pkg build/server.cjs --targets node18-win-x64 --output release/CTF Pilot.exe && npm run copy:dist:exe"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

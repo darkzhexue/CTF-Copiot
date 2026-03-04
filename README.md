@@ -1,4 +1,4 @@
-# CTF Assistant（Ollama 本地版）
+# CTF Pilot（Ollama 本地版）
 
 一个可本地运行的 CTF 助手，支持：
 - 本机 Ollama 模型对话（流式返回）
@@ -26,7 +26,7 @@
 本项目有两种使用方式：
 
 1. **已打包版（推荐给普通使用者）**
-   - 直接使用 `release/ctf-assistant.exe`
+   - 直接使用 `release/CTF Pilot.exe`
    - 不需要 Node.js
    - 仍然需要本机 Ollama + 模型
 
@@ -96,14 +96,14 @@ ollama pull qwen3:8b
 ### 第 2 步：进入发布目录并启动
 
 - 确保目录中存在：
-  - `release/ctf-assistant.exe`
+   - `release/CTF Pilot.exe`
   - `release/dist/`（前端静态文件）
 
-- 双击运行 `ctf-assistant.exe`，或在终端执行：
+- 双击运行 `CTF Pilot.exe`，或在终端执行：
 
 ```bash
 cd release
-./ctf-assistant.exe
+./CTF Pilot.exe
 ```
 
 启动后访问：
@@ -177,12 +177,12 @@ npm run pack:exe
 该命令会依次执行：
 1. `npm run build`：打包前端到 `dist/`
 2. `npm run build:server:exe`：将 `server.ts` 打包为 `build/server.cjs`
-3. `pkg ...`：生成 `release/ctf-assistant.exe`
+3. `pkg ...`：生成 `release/CTF Pilot.exe`
 4. `npm run copy:dist:exe`：复制 `dist/` 到 `release/dist/`
 
 ### 发布产物
 
-- `release/ctf-assistant.exe`
+- `release/CTF Pilot.exe`
 - `release/dist/`
 
 > 两者需保持同级目录，exe 才能正确提供前端页面。
@@ -212,7 +212,7 @@ npm run pack:exe          # 一键生成 exe 发布包
 ├─ dist/                     # 前端打包产物（build 后生成）
 ├─ build/server.cjs          # 服务端打包文件（build:server:exe 后生成）
 ├─ release/                  # 发布目录
-│  ├─ ctf-assistant.exe
+│  ├─ CTF Pilot.exe
 │  └─ dist/
 ├─ start-server.bat          # Windows 开发启动脚本
 └─ stop-server.bat           # Windows 停止脚本（按端口 3000）
@@ -257,7 +257,7 @@ ollama list
 
 ### 4) exe 能启动但页面空白
 
-检查 `release/dist/` 是否与 `release/ctf-assistant.exe` 同级存在。
+检查 `release/dist/` 是否与 `release/CTF Pilot.exe` 同级存在。
 
 ---
 
@@ -268,7 +268,7 @@ ollama list
 ```bash
 ollama pull qwen3:8b
 cd release
-./ctf-assistant.exe
+./CTF Pilot.exe
 ```
 
 浏览器访问 `http://localhost:3000`。

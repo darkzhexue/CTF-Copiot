@@ -1,5 +1,5 @@
 {
-  "name": "CTF Qwen Assistant",
-  "description": "A CTF assistant dashboard interfacing with local Ollama (Qwen) or Gemini, featuring crypto tools and chat.",
+  "name": "CTF Pilot",
+  "description": "A CTF dashboard interfacing with local Ollama, featuring crypto tools and chat.",
   "requestFramePermissions": []
 }

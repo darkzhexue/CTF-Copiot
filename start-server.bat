@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo 启动开发服务...
-start "CTF Assistant Dev" powershell -NoLogo -NoExit -Command "Set-Location '%~dp0'; npm run dev"
+start "CTF Pilot Dev" powershell -NoLogo -NoExit -Command "Set-Location '%~dp0'; npm run dev"
 
 timeout /t 2 >nul
 start "" "http://localhost:3000"
