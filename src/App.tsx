@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2, ChevronRight, ChevronDown, ImagePlus, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -8,6 +8,7 @@ import { tools } from '@/lib/ctf-tools';
 type Message = {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  images?: string[]; // base64-encoded images (without data-URL prefix) for multimodal models
   thoughts?: string; // optional chain-of-thought or reasoning
   thoughtsStartedAt?: number;
   thoughtsEndedAt?: number;
@@ -17,6 +18,41 @@ type Message = {
 type ToolType = 'base64' | 'hex' | 'url' | 'binary' | 'ascii' | 'morse' | 'rot13' | 'rot47';
 
 const INITIAL_SYSTEM_MESSAGE = `你好，我是 CTF 解题助手。我可以协助代码审计、逆向分析、编码/加密识别、Linux 提权排查和流量分析；直接贴题目现象、代码或数据即可开始。`;
+
+// --- Image upload utility ---
+// Resizes image to fit within maxDimension while preserving aspect ratio,
+// then returns raw base64 (no data-URL prefix) as JPEG for Ollama multimodal API.
+const resizeImageToBase64 = (file: File, maxDimension = 1600): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width >= height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas 2D context unavailable')); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataURL = canvas.toDataURL('image/jpeg', 0.85);
+        resolve(dataURL.split(',')[1]);
+      };
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
 
 // --- Components ---
 
@@ -85,6 +121,10 @@ export default function App() {
   const shouldAutoScrollRef = useRef(true);
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const activeConvIdRef = useRef(activeConvId);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // Pending images waiting to be attached to the next outgoing message (base64, no data-URL prefix)
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
  
   // 思考模式开关（是否请求模型输出带有思考链）
   const [enableThoughts] = useState(true);
@@ -303,8 +343,25 @@ export default function App() {
     setMessages(nextConv.messages);
   };
 
-  const handleAbort = async () => {
-    if (!isLoading && !activeRequestControllerRef.current) return;
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (!files.length) return;
+    try {
+      const encoded = await Promise.all(files.map((f) => resizeImageToBase64(f)));
+      setPendingImages((prev) => [...prev, ...encoded]);
+    } catch (err: any) {
+      alert(`图片处理失败：${err?.message || String(err)}`);
+    } finally {
+      // Reset so the same file can be re-selected if desired
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  }, []);
+
+  const removePendingImage = useCallback((index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleAbort = async () => {    if (!isLoading && !activeRequestControllerRef.current) return;
     setIsAborting(true);
     try {
       await fetch('/api/ollama/abort', { method: 'POST' });
@@ -333,19 +390,29 @@ export default function App() {
   };
 
   const handleSend = async (text: string = input) => {
-    if (!text.trim()) return;
+    if (!text.trim() && pendingImages.length === 0) return;
     shouldAutoScrollRef.current = true;
     const requestConvId = activeConvIdRef.current;
     const baseMessages = conversations.find(c => c.id === requestConvId)?.messages ?? messages;
-    const userMsg: Message = { role: 'user', content: text, timestamp: Date.now() };
+    const userMsg: Message = {
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+      ...(pendingImages.length > 0 ? { images: [...pendingImages] } : {})
+    };
     applyConversationMessages(requestConvId, (prev) => [...prev, userMsg]);
     setInput('');
+    setPendingImages([]);
     setIsLoading(true);
     const requestController = new AbortController();
     activeRequestControllerRef.current = requestController;
     try {
       const endpoint = '/api/ollama/chat';
-      const outgoing = [...baseMessages, userMsg].map(m => ({ role: m.role, content: m.content }));
+      const outgoing = [...baseMessages, userMsg].map(m => ({
+        role: m.role,
+        content: m.content,
+        ...(m.images && m.images.length > 0 ? { images: m.images } : {})
+      }));
       const payload = {
         model: ollamaModel,
         messages: outgoing,
@@ -885,6 +952,18 @@ export default function App() {
                         })()}
                       </div>
                     )}
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="mb-2 flex flex-wrap gap-2">
+                        {msg.images.map((b64, imgIdx) => (
+                          <img
+                            key={imgIdx}
+                            src={`data:image/jpeg;base64,${b64}`}
+                            alt={`图片 ${imgIdx + 1}`}
+                            className="max-h-48 max-w-xs rounded border border-gray-700/60 object-contain"
+                          />
+                        ))}
+                      </div>
+                    )}
                     {msg.content}
                   </div>
                   {msg.role !== 'system' && (
@@ -916,7 +995,49 @@ export default function App() {
                 ))}
               </div>
 
+              {/* Pending image thumbnails */}
+              {pendingImages.length > 0 && (
+                <div className="max-w-3xl mx-auto flex gap-2 flex-wrap">
+                  {pendingImages.map((b64, idx) => (
+                    <div key={idx} className="relative group">
+                      <img
+                        src={`data:image/jpeg;base64,${b64}`}
+                        alt={`待发图片 ${idx + 1}`}
+                        className="h-16 w-16 object-cover rounded border border-gray-700/60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePendingImage(idx)}
+                        className="absolute -top-1.5 -right-1.5 h-4 w-4 flex items-center justify-center rounded-full bg-red-600 text-white opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none transition-opacity"
+                        title="移除图片"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Input row */}
               <div className="max-w-3xl mx-auto flex gap-2">
+                {/* Hidden file input for image upload */}
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                  multiple
+                  className="hidden"
+                  onChange={handleImageUpload}
+                />
+                <button
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={isLoading}
+                  title="上传图片（JPG / JPEG / PNG）"
+                  className="h-10 w-10 flex-shrink-0 flex items-center justify-center bg-gray-800/20 hover:bg-gray-800/40 border border-gray-500/30 text-white rounded-md transition-colors disabled:opacity-50"
+                >
+                  <ImagePlus className="w-4 h-4" />
+                </button>
                 <input
                   type="text"
                   value={input}
