@@ -6,7 +6,9 @@ const PORT = 3000;
 
 async function startServer() {
   const app = express();
-  app.use(express.json());
+  // Images are sent as base64 inside JSON; default 100kb is too small.
+  app.use(express.json({ limit: "25mb" }));
+  app.use(express.urlencoded({ limit: "25mb", extended: true }));
 
   // Track current streaming request to Ollama so we can cancel it.
   let currentOllamaController: AbortController | null = null;
@@ -176,6 +178,17 @@ async function startServer() {
       : path.resolve(process.cwd(), "dist");
     app.use(express.static(distPath));
   }
+
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === "entity.too.large") {
+      return res.status(413).json({
+        error: "Payload too large",
+        details: "Request body exceeds server limit (25mb)",
+        hint: "Use a smaller image, fewer images, or reduce image quality before upload.",
+      });
+    }
+    return next(err);
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);

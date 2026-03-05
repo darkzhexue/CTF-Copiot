@@ -29713,7 +29713,8 @@ var import_path = __toESM(require("path"), 1);
 var PORT = 3e3;
 async function startServer() {
   const app = (0, import_express.default)();
-  app.use(import_express.default.json());
+  app.use(import_express.default.json({ limit: "25mb" }));
+  app.use(import_express.default.urlencoded({ limit: "25mb", extended: true }));
   let currentOllamaController = null;
   let currentOllamaResponse = null;
   app.get("/api/health", (_req, res) => {
@@ -29850,6 +29851,16 @@ async function startServer() {
     const distPath = isPkg ? import_path.default.join(import_path.default.dirname(process.execPath), "dist") : import_path.default.resolve(process.cwd(), "dist");
     app.use(import_express.default.static(distPath));
   }
+  app.use((err, _req, res, next) => {
+    if (err?.type === "entity.too.large") {
+      return res.status(413).json({
+        error: "Payload too large",
+        details: "Request body exceeds server limit (25mb)",
+        hint: "Use a smaller image, fewer images, or reduce image quality before upload."
+      });
+    }
+    return next(err);
+  });
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
