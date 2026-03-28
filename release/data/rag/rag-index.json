@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "chunkSize": 900,
+  "chunkOverlap": 150,
+  "embeddingDim": 256,
+  "documents": [],
+  "chunks": [],
+  "updatedAt": 1774719567307
+}

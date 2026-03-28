@@ -6,7 +6,77 @@
 - 本机 Ollama 对话（流式返回）
 - 本地模型列表读取与切换
 - 手动中断当前生成
+- RAG 外挂知识库（PDF / Markdown 导入、离线索引、检索、引用来源）
 - Windows 一键安装 / 启动 / 停止 / 打包（4 个 bat）
+
+---
+
+## RAG 外挂知识库（新增）
+
+项目内置了本地离线可运行的 RAG 流程：
+1. 文档导入：上传 PDF / Markdown 到本地知识库
+2. 分块与索引：按 chunk 配置切片，并生成离线 embedding
+3. 检索：按 query 返回 top-k 片段
+4. 回答：将命中片段注入对话上下文，并在回答卡片展示引用来源（文件名 + 片段）
+
+### 前端使用（推荐）
+
+1. 启动项目后进入聊天页
+2. 点击 `导入 PDF/MD`
+3. 可选点击 `重建索引`
+4. 打开 `RAG 开启`，设置 `Top-K`
+5. 通过 `已导入文档列表` 面板确认文件是否真的已入库
+6. 如果导错文档，可在列表里直接删除单个文档
+7. 提问后在回答底部查看 `引用来源`
+
+### Top-K 是什么？
+
+`Top-K` 指的是：
+当你提问时，系统会先从知识库里检索出“最相关”的若干个文本片段，再把这些片段交给模型参考。这里的 `K`，就是“取前多少条结果”。
+
+例如：
+- `Top-K = 2`：只取最相关的 2 个片段
+- `Top-K = 4`：取最相关的 4 个片段
+- `Top-K = 8`：取最相关的 8 个片段
+
+调参建议：
+- 值较小：上下文更干净，回答更聚焦，但可能漏掉有用信息
+- 值较大：召回更多信息，不容易漏检，但也可能带入无关内容，导致回答变散
+- 一般可以先用 `4`，如果回答信息不足就调大，如果回答开始跑偏就调小
+
+### API 使用（调试 / 自动化）
+
+```bash
+# 1) 查看状态
+curl http://localhost:3000/api/rag/status
+
+# 2) 导入文档（Windows PowerShell）
+curl -Method Post -Uri http://localhost:3000/api/rag/import -Form @{
+	files = Get-Item .\knowledge\*.pdf
+	autoIndex = 'true'
+}
+
+# 3) 强制重建索引
+curl -Method Post http://localhost:3000/api/rag/reindex
+
+# 4) 检索 top-k
+curl -Method Post -ContentType 'application/json' -Uri http://localhost:3000/api/rag/search -Body '{"query":"Linux 提权 常见路径","topK":4}'
+
+# 5) RAG 对话（非流式，返回 ragSources）
+curl -Method Post -ContentType 'application/json' -Uri http://localhost:3000/api/rag/chat -Body '{"model":"qwen3:8b","stream":false,"topK":4,"messages":[{"role":"user","content":"总结 Linux 提权思路"}]}'
+```
+
+### 可配置项
+
+- `RAG_CHUNK_SIZE`：分块大小，默认 `900`
+- `RAG_CHUNK_OVERLAP`：分块重叠，默认 `150`
+- `RAG_EMBED_DIM`：离线 embedding 维度，默认 `256`
+- `RAG_TOP_K`：默认检索条数，默认 `4`
+- `RAG_MIN_SCORE`：最低相关度阈值（0-1），低于该分数不展示引用来源，默认 `0.12`
+- `RAG_MAX_FILE_BYTES`：单文件上传限制，默认 `20MB`
+- `RAG_MAX_FILES`：单次上传文件数限制，默认 `50`
+
+数据文件默认保存到：`data/rag/rag-index.json`
 
 ---
 

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "chunkSize": 900,
+  "chunkOverlap": 150,
+  "embeddingDim": 256,
+  "documents": [
+    {
+      "id": "1973b20d-dd0e-411d-8b72-270c1e84cc7b",
+      "fileName": "tmp-rag-test.pdf",
+      "fileType": "pdf",
+      "addedAt": 1774716936117,
+      "updatedAt": 1774716936117
+    }
+  ],
+  "chunks": [
+    {
+      "id": "1973b20d-dd0e-411d-8b72-270c1e84cc7b:1",
+      "documentId": "1973b20d-dd0e-411d-8b72-270c1e84cc7b",
+      "fileName": "tmp-rag-test.pdf",
+      "text": "Hello RAG PDF"
+    }
+  ],
+  "updatedAt": 1774716936118
+}

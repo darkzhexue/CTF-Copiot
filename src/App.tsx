@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2, ChevronRight, ChevronDown, ImagePlus, X } from 'lucide-react';
+import { Send, Terminal, Settings, Shield, Cpu, Code, Lock, RefreshCw, AlertCircle, Plus, Square, Trash2, ChevronRight, ChevronDown, ImagePlus, X, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { tools } from '@/lib/ctf-tools';
@@ -9,10 +9,27 @@ type Message = {
   role: 'user' | 'assistant' | 'system';
   content: string;
   images?: string[]; // base64-encoded images (without data-URL prefix) for multimodal models
+  sources?: RagSource[];
   thoughts?: string; // optional chain-of-thought or reasoning
   thoughtsStartedAt?: number;
   thoughtsEndedAt?: number;
   timestamp: number;
+};
+
+type RagSource = {
+  fileName: string;
+  snippet: string;
+  score: number;
+  chunkId: string;
+};
+
+type RagDocumentSummary = {
+  id: string;
+  fileName: string;
+  fileType: 'pdf' | 'markdown' | 'text';
+  addedAt: number;
+  updatedAt: number;
+  chunkCount: number;
 };
 
 type ToolType = 'base64' | 'hex' | 'url' | 'binary' | 'ascii' | 'morse' | 'rot13' | 'rot47';
@@ -114,6 +131,28 @@ export default function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string>('');
+  const [ragEnabled, setRagEnabled] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem('ctf_rag_enabled');
+      return raw === null ? true : raw === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const [ragTopK, setRagTopK] = useState<number>(() => {
+    try {
+      const raw = Number(localStorage.getItem('ctf_rag_top_k') || 4);
+      if (!Number.isFinite(raw)) return 4;
+      return Math.max(1, Math.min(10, raw));
+    } catch {
+      return 4;
+    }
+  });
+  const [ragStatus, setRagStatus] = useState<string>('知识库未初始化');
+  const [ragBusy, setRagBusy] = useState<boolean>(false);
+  const [ragDocuments, setRagDocuments] = useState<RagDocumentSummary[]>([]);
+  const [ragAdvancedOpen, setRagAdvancedOpen] = useState<boolean>(false);
+  const [ragDeletingDocId, setRagDeletingDocId] = useState<string | null>(null);
   const [collapsedThoughts, setCollapsedThoughts] = useState<Record<string, boolean>>({});
   const [timerNow, setTimerNow] = useState<number>(Date.now());
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -122,6 +161,7 @@ export default function App() {
   const activeRequestControllerRef = useRef<AbortController | null>(null);
   const activeConvIdRef = useRef(activeConvId);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const ragDocInputRef = useRef<HTMLInputElement>(null);
 
   // Pending images waiting to be attached to the next outgoing message (base64, no data-URL prefix)
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -183,6 +223,32 @@ export default function App() {
     }
   };
 
+  const loadRagStatus = async () => {
+    try {
+      const res = await fetch('/api/rag/status');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '读取知识库状态失败');
+      }
+      setRagStatus(`文档 ${data.documents} / 分块 ${data.chunks} / 已向量化 ${data.embeddedChunks}`);
+    } catch (error: any) {
+      setRagStatus(`知识库状态异常：${error?.message || String(error)}`);
+    }
+  };
+
+  const loadRagDocuments = async () => {
+    try {
+      const res = await fetch('/api/rag/documents');
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '读取文档列表失败');
+      }
+      setRagDocuments(Array.isArray(data?.documents) ? data.documents : []);
+    } catch {
+      setRagDocuments([]);
+    }
+  };
+
   // load/save conversations
   useEffect(() => {
     try {
@@ -223,6 +289,8 @@ export default function App() {
 
   useEffect(() => {
     loadOllamaModels();
+    loadRagStatus();
+    loadRagDocuments();
   }, []);
 
   useEffect(() => {
@@ -265,6 +333,18 @@ export default function App() {
       localStorage.setItem('ctf_model_input_mode', modelInputMode);
     } catch {}
   }, [modelInputMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_rag_enabled', String(ragEnabled));
+    } catch {}
+  }, [ragEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('ctf_rag_top_k', String(ragTopK));
+    } catch {}
+  }, [ragTopK]);
 
   useEffect(() => {
     // when active conversation changes, update displayed messages
@@ -361,6 +441,101 @@ export default function App() {
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const handleRagUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []) as File[];
+    if (!files.length) return;
+    setRagBusy(true);
+    setRagStatus(`正在导入 ${files.length} 个文件...`);
+    try {
+      const form = new FormData();
+      files.forEach((file) => form.append('files', file));
+      form.append('autoIndex', 'true');
+      const res = await fetch('/api/rag/import', {
+        method: 'POST',
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '文档导入失败');
+      }
+      const indexed = data?.indexing?.indexedChunks || data?.status?.embeddedChunks || 0;
+      const errorText = Array.isArray(data?.errors) && data.errors.length > 0
+        ? `；错误：${data.errors.join(' | ')}`
+        : '';
+      setRagStatus(`导入完成：成功 ${data.imported}，跳过 ${data.skipped}，已向量化 ${indexed}${errorText}`);
+      await loadRagStatus();
+      await loadRagDocuments();
+    } catch (error: any) {
+      setRagStatus(`导入失败：${error?.message || String(error)}`);
+    } finally {
+      setRagBusy(false);
+      if (ragDocInputRef.current) ragDocInputRef.current.value = '';
+    }
+  }, []);
+
+  const handleRagReindex = useCallback(async () => {
+    setRagBusy(true);
+    setRagStatus('正在重建向量索引...');
+    try {
+      const res = await fetch('/api/rag/reindex', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || '重建索引失败');
+      }
+      const indexed = data?.indexing?.indexedChunks ?? 0;
+      setRagStatus(`重建完成：已向量化分块 ${indexed}`);
+      await loadRagStatus();
+      await loadRagDocuments();
+    } catch (error: any) {
+      setRagStatus(`重建失败：${error?.message || String(error)}`);
+    } finally {
+      setRagBusy(false);
+    }
+  }, []);
+
+  const handleDeleteRagDocument = useCallback(async (doc: RagDocumentSummary) => {
+    const confirmed = window.confirm(`确定要删除知识库文档“${doc.fileName}”吗？\n这会同时移除对应分块与索引。`);
+    if (!confirmed) return;
+
+    setRagDeletingDocId(doc.id);
+    setRagStatus(`正在删除：${doc.fileName}`);
+    try {
+      const res = await fetch(`/api/rag/documents/${encodeURIComponent(doc.id)}`, {
+        method: 'DELETE',
+      });
+      const raw = await res.text();
+      let data: any = null;
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          if (!res.ok) {
+            throw new Error('当前运行中的服务不是最新版本，请先重启开发服务后再试。');
+          }
+          throw new Error(raw);
+        }
+      }
+      if (!res.ok) {
+        throw new Error(data?.error || raw || '删除文档失败');
+      }
+      setRagDocuments(Array.isArray(data?.documents) ? data.documents : []);
+      if (data?.status) {
+        setRagStatus(`已删除：${doc.fileName}，剩余文档 ${data.status.documents}，分块 ${data.status.chunks}`);
+      } else {
+        await loadRagStatus();
+      }
+    } catch (error: any) {
+      const message = error?.message || String(error);
+      if (/Unexpected end of JSON input|not latest version|重启开发服务/i.test(message)) {
+        setRagStatus('删除失败：当前运行中的服务还是旧版本，请先重启开发服务后再试。');
+      } else {
+        setRagStatus(`删除失败：${message}`);
+      }
+    } finally {
+      setRagDeletingDocId(null);
+    }
+  }, []);
+
   const handleAbort = async () => {    if (!isLoading && !activeRequestControllerRef.current) return;
     setIsAborting(true);
     try {
@@ -407,7 +582,7 @@ export default function App() {
     const requestController = new AbortController();
     activeRequestControllerRef.current = requestController;
     try {
-      const endpoint = '/api/ollama/chat';
+      const endpoint = ragEnabled ? '/api/rag/chat' : '/api/ollama/chat';
       const outgoing = [...baseMessages, userMsg].map(m => ({
         role: m.role,
         content: m.content,
@@ -417,7 +592,8 @@ export default function App() {
         model: ollamaModel,
         messages: outgoing,
         stream: enableStreaming,
-        options: { think: enableThoughts }
+        options: { think: enableThoughts },
+        topK: ragTopK
       };
       if (enableStreaming && typeof ReadableStream !== 'undefined') {
         const res = await fetch(endpoint, {
@@ -434,6 +610,7 @@ export default function App() {
         let pendingThoughts = '';
         let pendingThoughtStartedAt: number | undefined;
         let pendingThoughtEndedAt: number | undefined;
+        let pendingSources: RagSource[] = [];
         let charQueue = '';
         let streamEnded = false;
         let typingTimer: ReturnType<typeof setInterval> | null = null;
@@ -444,6 +621,7 @@ export default function App() {
             const updatedLast: Message = {
               ...last,
               content: pendingContent,
+              ...(pendingSources.length ? { sources: pendingSources } : {}),
               ...(pendingThoughts ? { thoughts: pendingThoughts } : {}),
               ...(pendingThoughtStartedAt ? { thoughtsStartedAt: pendingThoughtStartedAt } : {}),
               ...(pendingThoughtEndedAt ? { thoughtsEndedAt: pendingThoughtEndedAt } : {})
@@ -478,6 +656,18 @@ export default function App() {
           if (!line) return;
           try {
             const obj = JSON.parse(line);
+            if (Array.isArray(obj?.rag_sources)) {
+              pendingSources = obj.rag_sources
+                .map((item: any) => ({
+                  fileName: String(item?.fileName || ''),
+                  snippet: String(item?.snippet || ''),
+                  score: Number(item?.score || 0),
+                  chunkId: String(item?.chunkId || ''),
+                }))
+                .filter((item: RagSource) => item.fileName && item.snippet);
+              updateAssistantMessage();
+              return;
+            }
             const rawFragment = obj?.message?.content ?? obj?.content ?? '';
             const fragment = String(rawFragment).replace(/\[\[THOUGHTS\]\]|\[\[\/THOUGHTS\]\]/gi, '');
             if (fragment) {
@@ -557,6 +747,16 @@ export default function App() {
         if (!res.ok) {
           throw new Error(data.error || 'Failed to fetch response');
         }
+        const ragSources: RagSource[] = Array.isArray(data?.ragSources)
+          ? data.ragSources
+              .map((item: any) => ({
+                fileName: String(item?.fileName || ''),
+                snippet: String(item?.snippet || ''),
+                score: Number(item?.score || 0),
+                chunkId: String(item?.chunkId || ''),
+              }))
+              .filter((item: RagSource) => item.fileName && item.snippet)
+          : [];
         let content = '';
         let thoughts: string | undefined;
         if (data.message) {
@@ -582,6 +782,7 @@ export default function App() {
           role: 'assistant',
           content,
           timestamp: messageTimestamp,
+          ...(ragSources.length ? { sources: ragSources } : {}),
           ...(thoughts
             ? { thoughts, thoughtsStartedAt: messageTimestamp, thoughtsEndedAt: messageTimestamp }
             : {})
@@ -600,7 +801,7 @@ export default function App() {
       }
       applyConversationMessages(requestConvId, (prev) => [...prev, {
         role: 'system',
-        content: `Error: ${error?.message || String(error)}. Ensure Ollama is running on http://localhost:11434`,
+        content: `Error: ${error?.message || String(error)}. Ensure Ollama is running on http://localhost:11434${ragEnabled ? ' and RAG index has documents.' : ''}`,
         timestamp: Date.now()
       }]);
     } finally {
@@ -860,36 +1061,168 @@ export default function App() {
         {activeTab === 'chat' && (
           <>
             {/* Chat Area */}
-            <div className="p-4 border-b border-green-900/30 flex items-center justify-between space-x-2">
-              <div className="flex items-center gap-2">
-                <label className="text-xs opacity-50">当前会话：</label>
-                <span className="text-sm text-white">{activeConversation?.name || '未选择'}</span>
+            <div className="p-4 border-b border-green-900/30 bg-gradient-to-r from-black/30 to-black/10 space-y-2.5">
+              <input
+                ref={ragDocInputRef}
+                type="file"
+                accept=".pdf,.md,.markdown,text/markdown,application/pdf,text/plain"
+                multiple
+                className="hidden"
+                onChange={handleRagUpload}
+              />
+
+              <div className="flex flex-wrap items-center justify-between gap-2.5">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <div className="flex items-center gap-2 mr-2">
+                    <label className="text-xs opacity-50">当前会话：</label>
+                    <span className="text-sm text-white">{activeConversation?.name || '未选择'}</span>
+                  </div>
+                  <span className="text-gray-400">知识库</span>
+                  <button
+                    type="button"
+                    onClick={() => setRagEnabled((prev) => !prev)}
+                    className={cn(
+                      'h-7 px-3 rounded-md border font-medium transition-colors',
+                      ragEnabled
+                        ? 'border-emerald-500/70 bg-emerald-900/20 text-emerald-100'
+                        : 'border-gray-700/70 bg-gray-900/20 text-gray-300'
+                    )}
+                  >
+                    {ragEnabled ? 'RAG 开启' : 'RAG 关闭'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => ragDocInputRef.current?.click()}
+                    disabled={ragBusy || isLoading}
+                    className="h-7 px-2.5 rounded-md border border-gray-700/70 text-gray-200 hover:text-white hover:border-gray-500 disabled:opacity-50"
+                  >
+                    导入 PDF/MD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRagAdvancedOpen((prev) => !prev)}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md border border-gray-700/70 bg-black/25 px-2.5 text-gray-200 hover:border-gray-500"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    <span>RAG 高级选项</span>
+                    {ragAdvancedOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={deleteCurrentConversation}
+                    disabled={isLoading || isAborting}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>删除当前</span>
+                  </button>
+                  <button
+                    onClick={clearConversationHistory}
+                    disabled={isLoading || isAborting}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    <span>清空记录</span>
+                  </button>
+                  <button
+                    onClick={createConversation}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-700/50 bg-black/40 px-3 text-xs text-gray-200 transition-colors hover:border-gray-500/70 hover:bg-gray-800/30 hover:text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>新建对话</span>
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={deleteCurrentConversation}
-                  disabled={isLoading || isAborting}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>删除当前</span>
-                </button>
-                <button
-                  onClick={clearConversationHistory}
-                  disabled={isLoading || isAborting}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-700/40 bg-red-900/10 px-3 text-xs text-red-200 transition-colors hover:border-red-500/70 hover:bg-red-900/25 hover:text-red-100 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <AlertCircle className="h-3.5 w-3.5" />
-                  <span>清空记录</span>
-                </button>
-                <button
-                  onClick={createConversation}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-gray-700/50 bg-black/40 px-3 text-xs text-gray-200 transition-colors hover:border-gray-500/70 hover:bg-gray-800/30 hover:text-white"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>新建对话</span>
-                </button>
-              </div>
+
+              <AnimatePresence initial={false}>
+                {ragAdvancedOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="mt-2 border-t border-gray-800/50 pt-2 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                        <label className="text-gray-500">Top-K</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={ragTopK}
+                          onChange={(e) => {
+                            const next = Number(e.target.value);
+                            if (!Number.isFinite(next)) return;
+                            setRagTopK(Math.max(1, Math.min(10, next)));
+                          }}
+                          className="h-7 w-14 rounded-md border border-gray-700/70 bg-black/60 px-2 text-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleRagReindex}
+                          disabled={ragBusy || isLoading}
+                          className="h-7 px-2.5 rounded-md border border-gray-700/70 text-gray-200 hover:text-white hover:border-gray-500 disabled:opacity-50"
+                        >
+                          重建索引
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await loadRagStatus();
+                            await loadRagDocuments();
+                          }}
+                          disabled={ragBusy || isLoading}
+                          className="h-7 px-2.5 rounded-md border border-gray-700/70 text-gray-200 hover:text-white hover:border-gray-500 disabled:opacity-50"
+                        >
+                          刷新状态
+                        </button>
+                        <span className="text-gray-500 truncate">{ragBusy ? '处理中...' : ragStatus}</span>
+                      </div>
+
+                      <div className="text-xs text-gray-300">
+                        <div className="mb-1.5 inline-flex items-center gap-1.5 text-gray-400">
+                          <FileText className="h-3.5 w-3.5" />
+                          <span>已导入文档 ({ragDocuments.length})</span>
+                        </div>
+                        <div className="max-h-44 overflow-y-auto divide-y divide-gray-800/50 border-t border-gray-800/50">
+                          {ragDocuments.length === 0 ? (
+                            <div className="py-2 text-gray-500">
+                              当前没有已入库文档。导入 PDF 或 Markdown 后，这里会显示文件名、类型、分块数和更新时间。
+                            </div>
+                          ) : (
+                            ragDocuments.map((doc) => (
+                              <div key={doc.id} className="py-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="min-w-0 flex-1 truncate text-sm text-white">{doc.fileName}</div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[11px] text-gray-500">{doc.fileType.toUpperCase()}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteRagDocument(doc)}
+                                      disabled={ragDeletingDocId === doc.id || ragBusy || isLoading}
+                                      className="inline-flex h-6 items-center gap-1 rounded-md border border-red-700/40 bg-red-900/10 px-2 text-[11px] text-red-200 hover:border-red-500/70 hover:bg-red-900/20 disabled:opacity-40"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      <span>{ragDeletingDocId === doc.id ? '删除中' : '删除'}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-500">
+                                  <span>分块 {doc.chunkCount}</span>
+                                  <span>更新时间 {new Date(doc.updatedAt).toLocaleString()}</span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
             <div
               ref={messagesContainerRef}
@@ -965,6 +1298,17 @@ export default function App() {
                       </div>
                     )}
                     {msg.content}
+                    {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                      <div className="mt-3 border-t border-gray-700/40 pt-2 text-xs text-gray-300 space-y-1.5">
+                        <div className="text-gray-400">引用来源</div>
+                        {msg.sources.map((source, sourceIdx) => (
+                          <div key={`${source.chunkId}-${sourceIdx}`} className="rounded border border-gray-800/60 bg-gray-900/35 px-2 py-1.5">
+                            <div className="text-gray-200">{source.fileName} <span className="text-gray-500">(score {source.score.toFixed(3)})</span></div>
+                            <div className="text-gray-400">{source.snippet}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {msg.role !== 'system' && (
                     <span className="text-[10px] opacity-30 mt-1 uppercase">{msg.role} // {new Date(msg.timestamp).toLocaleTimeString()}</span>
